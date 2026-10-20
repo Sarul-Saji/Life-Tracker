@@ -1,0 +1,11 @@
+# Private documents must never be uploaded (the GitHub repo is public)
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.csv
+lifequest-backup-*.json
+
+# Local-only tool settings
+.claude/settings.local.json
