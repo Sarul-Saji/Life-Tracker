@@ -1,7 +1,7 @@
 {
-  "name": "Life Quest",
-  "short_name": "Life Quest",
-  "description": "A quiet place to track the things that matter.",
+  "name": "Compound",
+  "short_name": "Compound",
+  "description": "Small wins, compounding.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
