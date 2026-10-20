@@ -1,7 +1,7 @@
 // Service worker: lets Compound open with no internet, like a real app.
 // Strategy: try the internet first (so you always get the newest version),
 // and fall back to the saved copy when you're offline.
-const CACHE = 'compound-v3';
+const CACHE = 'compound-v4';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.json',
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png',

@@ -89,6 +89,11 @@ const ICONS = {
   briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2M3 12h18"/>',
   coins: '<ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+  bottle: '<path d="M10 3h4v3l2 3v11a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V9l2-3Z"/><path d="M8 13h8"/>',
+  cap: '<path d="M2 9l10-5 10 5-10 5Z"/><path d="M6 11v5c2 2 10 2 12 0v-5M22 9v6"/>',
+  passport: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M9 16h6"/>',
+  sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
+  target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8"/>',
 };
 const icon = name => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.dots}</svg>`;
 const LOGO = `<svg class="logo" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="var(--ink)"/><path d="M24 74H76" stroke="var(--muted)" stroke-width="2" stroke-linecap="round"/><path d="M24 70C50 70 62 60 72 30" fill="none" stroke="var(--gold)" stroke-width="3.5" stroke-linecap="round"/><circle cx="72" cy="30" r="4.5" fill="var(--bg)"/></svg>`;
@@ -117,7 +122,8 @@ function upgrade(s) {
   if (s.version === 1) s = migrateV1(s);
   s.version = 3;
   s.settings = Object.assign({}, DEFAULT_SETTINGS, s.settings);
-  s.money = Object.assign({ tx: [], recurring: [], closed: {} }, s.money);
+  s.money = Object.assign({ tx: [], recurring: [], closed: {}, budgets: { groceries: 120 } }, s.money);
+  if (s.loan && s.loan.autoEmi === undefined) s.loan.autoEmi = true;
   return s;
 }
 function migrateV1(s) {
@@ -179,10 +185,12 @@ function loanStats() {
   return s;
 }
 
-// Creates a loan entry (EMI or extra) and pushes it to the log
-function makeLoanEntry(type, amount, date) {
+// Creates a loan entry (EMI or extra) and pushes it to the log.
+// auto = logged by the app itself (the monthly EMI), so it earns XP but doesn't count as you showing up.
+function makeLoanEntry(type, amount, date, { auto = false } = {}) {
   const bal = Math.max(0, loanBalance());
   const e = { id: uid(), ts: Date.now(), type, date, amount };
+  if (auto) e.auto = true;
   let base;
   if (type === 'emi') {
     e.interest = Math.min(amount, Math.round(bal * state.loan.rate / 1200));
@@ -196,20 +204,42 @@ function makeLoanEntry(type, amount, date) {
     e.interestSaved = Math.max(0, now.interest - after.interest);
     base = extraXp(amount, e.monthsRemoved);
   }
-  const a = award(base);
+  const a = award(base, { passive: auto });
   e.xp = a.xp;
   e.mult = a.mult;
   state.loan.log.push(e);
   return e;
 }
 
+// The EMI is an automatic debit on the same day every month, so the app logs it for you
+function autoLogEmis() {
+  if (!state?.loan || state.loan.autoEmi === false) return [];
+  const made = [];
+  for (let i = 0; i < 24; i++) {
+    const s = loanStats();
+    if (s.bal <= 0 || new Date() < s.nextEmi) break;
+    made.push(makeLoanEntry('emi', state.loan.emi, toISO(s.nextEmi), { auto: true }));
+  }
+  if (made.length) save();
+  return made;
+}
+
+function runAutoEmi() {
+  if (!state?.loan || state.loan.autoEmi === false) return;
+  const g0 = globalStats(), made = autoLogEmis();
+  if (!made.length) return;
+  render();
+  const months = made.map(e => fmtMonth(parseISO(e.date)).split(' ')[0]).join(', ');
+  finishAction(g0, `${months} EMI logged automatically · <b>${inr(sum(made, e => e.principal))}</b> to principal · <b>+${sum(made, e => e.xp)} XP</b>`);
+}
+
 /* ---------- 4. Money engine (£) ---------- */
 const cat = (id, name, ic) => ({ id, name, icon: ic });
 const EXPENSE_CATS = [
-  cat('rent', 'Rent', 'home'), cat('bills', 'Bills', 'bolt'), cat('groceries', 'Groceries', 'basket'),
-  cat('takeaway', 'Takeaways', 'bag'), cat('eatingout', 'Eating out', 'fork'), cat('transport', 'Transport', 'train'),
-  cat('subscriptions', 'Subscriptions', 'repeat'), cat('shopping', 'Shopping', 'tag'), cat('leisure', 'Leisure', 'ticket'),
-  cat('health', 'Health', 'heart'), cat('travel', 'Travel', 'plane'), cat('gifts', 'Gifts', 'gift'), cat('other', 'Other', 'dots'),
+  cat('rent', 'Rent', 'home'), cat('bills', 'Bills', 'bolt'), cat('groceries', 'Groceries', 'basket'), cat('household', 'Household', 'bottle'),
+  cat('takeaway', 'Takeaways', 'bag'), cat('eatingout', 'Eating out', 'fork'), cat('transport', 'Transport', 'train'), cat('subscriptions', 'Subscriptions', 'repeat'),
+  cat('shopping', 'Shopping', 'tag'), cat('leisure', 'Leisure', 'ticket'), cat('health', 'Health', 'heart'), cat('travel', 'Travel', 'plane'),
+  cat('cima', 'CIMA', 'cap'), cat('visa', 'Visa fee', 'passport'), cat('gifts', 'Gifts', 'gift'), cat('other', 'Other', 'dots'),
 ];
 const INCOME_CATS = [cat('salary', 'Salary', 'briefcase'), cat('tips', 'Tips', 'coins'), cat('refund', 'Refund', 'undo'), cat('otherin', 'Other', 'dots')];
 const PURPOSES = { emi: 'Loan EMI', extra: 'Loan extra', savings: 'Savings', family: 'Family' };
@@ -257,6 +287,28 @@ function latestRate() {
   return t ? t.inr / t.amount : null;
 }
 
+// Budgets: a monthly limit per category
+function budgetStatus(ym) {
+  const m = monthStats(ym);
+  return Object.entries(state.money.budgets).map(([id, limit]) => {
+    const spent = m.byCat[id] || 0;
+    return { id, limit, spent, left: limit - spent, pct: spent / limit, kept: spent <= limit };
+  });
+}
+
+// Treat fund: 5% of what you put to work each month becomes guilt-free spending money
+const TREAT_RATE = 0.05;
+const treatFor = m => Math.round(TREAT_RATE * (m.transfer.extra + m.saved));
+const treatBalance = () => sum(Object.values(state.money.closed), c => c.treat) - sum(state.money.tx, t => (t.treat ? t.amount : 0));
+
+const BUDGET_XP = 100;
+// Everything that happens when a month is closed
+function closeSummary(ym) {
+  const m = monthStats(ym), gr = gradeFor(m), budgets = budgetStatus(ym);
+  const kept = budgets.filter(b => b.kept).length, treat = treatFor(m);
+  return { m, gr, budgets, kept, treat, xp: gr.xp + kept * BUDGET_XP };
+}
+
 /* ---------- 5. Game engine ---------- */
 const XP = { emi: 150, perRupee: 1 / 100, perMonthSaved: 50 };
 const TX_XP = { expense: 10, income: 20, transfer: 30, nospend: 20 };
@@ -271,7 +323,7 @@ const multFor = streak => MOMENTUM.find(([d]) => streak >= d)[1];
 function activity() {
   const m = new Map();
   const add = (ts, xp) => { const d = dayOfTs(ts); m.set(d, (m.get(d) || 0) + (xp || 0)); };
-  (state.loan?.log || []).forEach(e => add(e.ts, e.xp));
+  (state.loan?.log || []).forEach(e => { if (!e.auto) add(e.ts, e.xp); });
   state.money.tx.forEach(t => add(t.ts, t.xp));
   return m;
 }
@@ -289,9 +341,11 @@ function streakInfo(act) {
   return { cur, best, today: act.has(today) };
 }
 
-// XP for an action right now: daily bonus for the first action, times momentum
-function award(base) {
+// XP for an action right now: daily bonus for the first action, times momentum.
+// Passive actions (done by the app for you) get your current multiplier but no daily bonus.
+function award(base, { passive = false } = {}) {
   const st = streakInfo(activity());
+  if (passive) { const mult = multFor(st.cur); return { xp: Math.round(base * mult), mult }; }
   const streakAfter = st.today ? st.cur : st.cur + 1;
   const mult = multFor(streakAfter), bonus = st.today ? 0 : DAILY_BONUS;
   return { xp: Math.round((base + bonus) * mult), mult };
@@ -401,6 +455,9 @@ const MILESTONES = [
   ms('ptw-40', 'Put 40% to work', 'In a closed month', 800, g => g.ptw40),
   ms('grade-a', 'An A month', '', 800, g => g.gradeA),
   ms('grade-aplus', 'A perfect month', 'Grade A+', 1500, g => g.gradeAPlus),
+  ms('budget-1', 'First budget kept', 'A limit you stuck to', 300, g => g.budgetMonths >= 1),
+  ms('budget-3', 'Three months on budget', '', 800, g => g.budgetMonths >= 3),
+  ms('treat-1', 'First guilt-free treat', 'Rewards make discipline last', 150, g => g.treats >= 1),
   ms('remit-1l', '₹1 lakh sent home', '', 300, g => g.inrSent >= 1e5),
   ms('remit-10l', '₹10 lakh sent home', '', 1500, g => g.inrSent >= 1e6),
   // Loan
@@ -441,6 +498,8 @@ function globalStats() {
     ptw40: closed.some(c => c.ptw >= 0.4),
     gradeA: closed.some(c => c.grade === 'A' || c.grade === 'A+'),
     gradeAPlus: closed.some(c => c.grade === 'A+'),
+    budgetMonths: closed.filter(c => c.budgetsKept > 0).length,
+    treats: tx.filter(t => t.treat).length,
     week: questStatus(weekStart(todayISO()), act),
   };
   const q = allQuests(act);
@@ -548,7 +607,11 @@ function homeView() {
       <div><div class="date">${today}</div><h1 class="greet">${greeting()},<br>${esc(name)}</h1></div>
       <button class="avatar" data-go="profile" aria-label="Profile">${ring(lv.into / lv.need, 50)}<span class="ini">${esc(name[0].toUpperCase())}</span></button>
     </header>
-    <div class="level-line"><span>Level <b>${lv.lvl}</b> · ${titleFor(lv.lvl)}</span><div class="bar gold"><i style="width:${(lv.into / lv.need) * 100}%"></i></div><span>${lv.into.toLocaleString('en-IN')} / ${lv.need.toLocaleString('en-IN')}</span></div>
+    <button class="level-line" data-act="xp-help" aria-label="How XP works">
+      <span>Level <b>${lv.lvl}</b> · ${titleFor(lv.lvl)}</span>
+      <div class="bar gold"><i style="width:${(lv.into / lv.need) * 100}%"></i></div>
+      <span>${lv.into.toLocaleString('en-IN')} / ${lv.need.toLocaleString('en-IN')} XP</span><span class="qmark">?</span>
+    </button>
     ${notices.join('')}
 
     <div class="section-title"><span>Momentum</span><span>Best ${g.best} day${g.best === 1 ? '' : 's'}</span></div>
@@ -653,6 +716,7 @@ function moneyView() {
   const today = todayISO();
   const canNoSpend = isNow && !state.money.tx.some(t => t.date === today && (t.type === 'expense' || t.type === 'nospend'));
   const canClose = ym < ymNow() && m.txCount && !closed;
+  const budgets = budgetStatus(ym), treat = treatBalance();
 
   let lastDay = '', txHtml = '';
   for (const t of monthTx) {
@@ -700,6 +764,22 @@ function moneyView() {
       </div>
     </section>
 
+    <div class="section-title"><span>Budgets</span><span>${budgets.length ? `${budgets.filter(b => b.kept).length} of ${budgets.length} on track` : ''}</span></div>
+    <section class="panel">
+      ${budgets.map(b => budgetRow(b, ym)).join('')}
+      <button class="more" data-act="budget-new">${icon('plus')} Add a budget</button>
+    </section>
+
+    <div class="section-title"><span>Treat fund</span><span>5% of what you put to work</span></div>
+    <section class="panel pad treat">
+      <div class="treat-top">
+        <div class="treat-mark">${icon('sparkle')}</div>
+        <div><div class="treat-bal">${gbp(treat)}</div><div class="muted small">ready to spend, guilt-free</div></div>
+        ${treat > 0 ? `<button class="btn btn-ghost btn-sm" data-act="treat-spend">Spend</button>` : ''}
+      </div>
+      <p class="treat-note">${closed ? `${ymLabel(ym, { month: 'long' })} added ${gbp(closed.treat || 0)}.` : `${isNow ? 'This month is on track to add' : 'Closing this month adds'} <b>${gbp(treatFor(m))}</b>${isNow ? ' when you close it' : ''}.`}</p>
+    </section>
+
     <div class="section-title"><span>Where it went</span><span>vs ${ymLabel(prev.ym, { month: 'short' })}</span></div>
     <section class="panel">${cats.length ? cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, cats[0][1])).join('') : '<p class="empty">No spending logged this month.</p>'}</section>
 
@@ -719,6 +799,20 @@ function moneyView() {
     <div class="section-title"><span>Recurring</span></div>
     <section class="panel">${state.money.recurring.length ? state.money.recurring.map(recItem).join('') : '<p class="empty">Tick "Repeat every month" when logging rent, salary or subscriptions, and they will show up here.</p>'}</section>
   </div>`;
+}
+
+function budgetRow(b, ym) {
+  const c = catOf(b.id), isNow = ym === ymNow();
+  const daysLeft = isNow ? parseISO(ymLastDay(ym)).getDate() - new Date().getDate() + 1 : 0;
+  const status = !b.kept ? `Over by ${gbp(-b.left)}`
+    : isNow ? `${gbp(b.left)} left · ${daysLeft} day${daysLeft === 1 ? '' : 's'} to go${b.left > 0 ? ` · ${gbp(b.left / daysLeft)} a day` : ''}`
+    : 'Kept · +100 XP at close';
+  const cls = !b.kept ? 'over' : b.pct >= 0.8 ? 'close' : '';
+  return `<button class="cat-row budget ${cls}" data-act="budget-edit" data-id="${b.id}">
+    <div class="mark">${icon(c.icon)}</div><div class="main">
+      <div class="n"><span>${c.name}</span><b>${gbp(b.spent)} <small>of ${gbp(b.limit)}</small></b></div>
+      <div class="bar"><i style="width:${Math.min(1, b.pct) * 100}%"></i></div>
+      <div class="d">${status}</div></div></button>`;
 }
 
 function catRow(id, v, last, max) {
@@ -743,7 +837,7 @@ function txItem(t) {
     const c = catOf(t.cat);
     ic = c.icon;
     title = t.note ? esc(t.note) : c.name;
-    sub = [t.note ? c.name : '', t.recurringId ? 'Recurring' : ''].filter(Boolean).join(' · ');
+    sub = [t.note ? c.name : '', t.recurringId ? 'Recurring' : '', t.treat ? 'Treat fund' : ''].filter(Boolean).join(' · ');
     amt = t.type === 'income' ? '+' + gbp(t.amount) : gbp(-t.amount);
   }
   return `<div class="hist ${t.type}">
@@ -808,6 +902,7 @@ function loanView() {
       <button class="kv" data-act="terms"><span class="k">Interest rate</span><span class="v">${L.rate}% ${icon('chevR')}</span></button>
       <button class="kv" data-act="terms"><span class="k">Monthly EMI</span><span class="v">${inr(L.emi)} ${icon('chevR')}</span></button>
       <button class="kv" data-act="sync"><span class="k">Sync balance with bank</span><span class="v">${icon('chevR')}</span></button>
+      <button class="kv" data-act="auto-emi"><span class="k">Log EMI automatically on the ${ordinal(parseISO(L.setupDate).getDate())}</span><span class="v">${L.autoEmi === false ? 'Off' : 'On'}</span></button>
     </section>
     <button class="btn btn-text btn-danger btn-block" data-act="remove-loan">Remove loan tracker</button>
   </div>`;
@@ -883,6 +978,7 @@ function profileView() {
       <h1 class="greet">${esc(name)}</h1>
       <div class="title-chip">${titleFor(lv.lvl)}</div>
       <div class="muted small">Level ${lv.lvl} · ${g.xp.toLocaleString('en-IN')} XP${nextTitle ? ` · ${nextTitle[1]} at level ${nextTitle[0]}` : ''}</div>
+      <button class="small-btn" data-act="xp-help">How XP works ${icon('chevR')}</button>
     </section>
 
     <div class="section-title"><span>Record</span></div>
@@ -928,11 +1024,11 @@ function closeSheet() {
 const sheetButtons = label => `<div class="sheet-actions"><button type="button" class="btn btn-ghost" data-close>Cancel</button><button class="btn btn-primary">${label}</button></div>`;
 const defaultDate = () => (moneyMonth === ymNow() || view !== 'money' ? todayISO() : ymLastDay(moneyMonth));
 
-function txSheet(type) {
-  const isInc = type === 'income', cats = isInc ? INCOME_CATS : EXPENSE_CATS;
+function txSheet(type, { treat = false } = {}) {
+  const isInc = type === 'income', cats = isInc ? INCOME_CATS : EXPENSE_CATS, fund = treatBalance();
   openSheet(`
-    <h2>${isInc ? 'Money in' : 'Money out'}</h2>
-    <p class="lead">${isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
+    <h2>${treat ? 'Treat yourself' : isInc ? 'Money in' : 'Money out'}</h2>
+    <p class="lead">${treat ? `You've earned ${gbp(fund)}. Spend it on something you enjoy, guilt-free.` : isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
     <form id="f-tx" data-type="${type}">
       <label class="field"><span>Amount (£)</span><input name="amount" inputmode="decimal" autocomplete="off" placeholder="${isInc ? '2,400' : '12.50'}"></label>
       <div class="cats">${cats.map((c, i) => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${isInc && i === 0 ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
@@ -941,6 +1037,7 @@ function txSheet(type) {
         <label class="field"><span>Date</span><input name="date" type="date" value="${defaultDate()}"></label>
       </div>
       <label class="check-row"><input type="checkbox" name="recurring"> Repeat every month</label>
+      ${!isInc && fund > 0 ? `<label class="check-row"><input type="checkbox" name="treat" ${treat ? 'checked' : ''}> Pay from treat fund (${gbp(fund)} available)</label>` : ''}
       <div id="tx-err" class="err"></div>
       ${sheetButtons('Save')}
     </form>`);
@@ -977,7 +1074,9 @@ function updateTransferPreview() {
   if (p === 'extra' && state.loan && r) {
     const bal = Math.max(0, loanBalance()), now = simulate(bal), after = simulate(bal - Math.min(r, bal));
     out.innerHTML = kv('Also logged as', 'Extra loan payment') + kv('Debt-free', `${dur(now.months - after.months)} sooner`, '', 'pos') + kv('Interest saved', lakh(now.interest - after.interest), '', 'pos');
-  } else if (p === 'emi') out.innerHTML = '<p class="empty">Log the EMI itself from the loan tracker when the bank debits it.</p>';
+  } else if (p === 'emi') out.innerHTML = `<p class="hint">This just moves money home. ${state.loan?.autoEmi === false ? 'Log the EMI itself in the loan tracker when the bank debits it.' : 'The EMI itself is logged automatically on the day the bank debits it.'}</p>`;
+  else if (p === 'savings') out.innerHTML = '<p class="hint">Money kept in India. Counts as saved.</p>';
+  else if (p === 'family') out.innerHTML = '<p class="hint">Money for family. Counts as spending.</p>';
   else out.innerHTML = '';
 }
 
@@ -987,7 +1086,10 @@ function paySheet(type) {
   const chips = [10000, 25000, 50000, 100000].map(v => `<button type="button" class="chip" data-amt="${v}">${lakh(v)}</button>`).join('');
   openSheet(`
     <h2>${isEmi ? 'Log EMI' : 'Pay extra'}</h2>
-    <p class="lead">${isEmi ? 'Record your monthly instalment once it has been debited.' : 'Every rupee above your EMI goes straight to the principal.'}</p>
+    <p class="lead">${isEmi
+      ? (state.loan.autoEmi === false ? 'Record your monthly instalment once it has been debited.' : 'Your EMI logs itself every month. Use this only for a missed or different payment.')
+      : 'For money paid from your Indian account. Every rupee goes straight to the principal.'}</p>
+    ${isEmi ? '' : `<p class="hint box">Sending it from the UK? Log it in <b>Money → To India</b> as <b>Loan extra</b> instead. It lands here automatically, so you never log it twice.</p>`}
     <form id="f-pay" data-type="${type}">
       <label class="field"><span>Amount (₹)</span><input id="m-amt" inputmode="decimal" autocomplete="off" value="${isEmi ? state.loan.emi : ''}" placeholder="50,000"></label>
       ${isEmi ? '' : `<div class="chips">${chips}</div>`}
@@ -1054,22 +1156,71 @@ function dueSheet() {
 }
 
 function closeMonthSheet(ym) {
-  const m = monthStats(ym), g = gradeFor(m);
+  const { m, gr, budgets, kept, treat, xp } = closeSummary(ym);
   openSheet(`
     <div class="reward-kicker">${ymLabel(ym)} · month close</div>
-    <div class="grade-big">${g.grade}</div>
+    <div class="grade-big">${gr.grade}</div>
     <div class="panel left">
       ${kv('Money in', gbp(m.income), '', 'pos')}
       ${kv('Living costs', gbp(m.living))}
       ${kv('Sent to the loan', gbp(m.loan))}
       ${kv('Put to work', m.ptw == null ? '—' : Math.round(m.ptw * 100) + '%', '', 'pos')}
       ${kv('Days logged', m.logDays)}
+      ${budgets.length ? kv('Budgets kept', `${kept} of ${budgets.length}`, kept ? `+${kept * BUDGET_XP} XP` : '', kept ? 'pos' : '') : ''}
+      ${kv('Treat fund', `+${gbp(treat)}`, '5% of what you put to work', 'pos')}
       ${kv('Left over', gbp(m.left), '', m.left >= 0 ? 'pos' : 'neg')}
     </div>
-    <div class="reward-xp">+${g.xp} XP</div>
+    <div class="reward-xp">+${xp.toLocaleString('en-IN')} XP</div>
     <button class="btn btn-primary btn-block" data-act="claim-month" data-ym="${ym}">Claim and close ${ymLabel(ym, { month: 'long' })}</button>
     ${m.left > 0 && state.loan ? `<button class="btn btn-text btn-block" data-act="leftover" data-amt="${Math.floor(m.left)}">Send the ${gbp(Math.floor(m.left))} left over to the loan</button>` : ''}`,
     { center: true });
+}
+
+function budgetSheet(catId = '') {
+  const used = Object.keys(state.money.budgets);
+  const choices = EXPENSE_CATS.filter(c => c.id === catId || !used.includes(c.id));
+  openSheet(`
+    <h2>${catId ? 'Edit budget' : 'New budget'}</h2>
+    <p class="lead">A monthly limit for one category. Keep it, and you earn +${BUDGET_XP} XP when you close the month.</p>
+    <form id="f-budget" data-old="${catId}">
+      <div class="cats">${choices.map(c => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${c.id === catId ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
+      <label class="field"><span>Monthly limit (£)</span><input name="limit" inputmode="decimal" autocomplete="off" value="${catId ? state.money.budgets[catId] : ''}" placeholder="120"></label>
+      <div id="b-err" class="err"></div>
+      ${sheetButtons('Save budget')}
+      ${catId ? `<button type="button" class="btn btn-text btn-danger btn-block" data-act="budget-del" data-id="${catId}">Remove this budget</button>` : ''}
+    </form>`);
+}
+
+function xpSheet() {
+  const g = globalStats(), lv = levelFrom(g.xp), mult = multFor(g.streak);
+  openSheet(`
+    <h2>How XP works</h2>
+    <p class="lead">Everything you log earns XP. XP fills your level bar, and each level needs a little more than the last. You're level ${lv.lvl}: ${(lv.need - lv.into).toLocaleString('en-IN')} XP to level ${lv.lvl + 1}.</p>
+    <div class="section-title"><span>Earn</span></div>
+    <div class="panel">
+      ${kv('Log an expense', '+10')}
+      ${kv('Log income', '+20')}
+      ${kv('Transfer to India', '+30')}
+      ${kv('No-spend day', '+20')}
+      ${kv('EMI', '+150', 'logged automatically each month')}
+      ${kv('Extra loan payment', '+1 per ₹100', '+50 for every month it cuts')}
+      ${kv('First log of the day', '+20 bonus')}
+    </div>
+    <div class="section-title"><span>Multiply</span></div>
+    <div class="panel">
+      ${kv('Momentum', `×${mult.toFixed(1)} now`, '×1.1 at 3 days, up to ×1.5 at 30')}
+    </div>
+    <div class="section-title"><span>Bonuses</span></div>
+    <div class="panel">
+      ${kv('Weekly quest', `+${QUEST_XP} each`, `+${CHEST_XP} for all three`)}
+      ${kv('Month close', '+100 to +1,000', 'by grade')}
+      ${kv('Budget kept', `+${BUDGET_XP}`, 'per budget, at month close')}
+      ${kv('Milestones', '+100 to +10,000', `${g.unlocked.length} of ${MILESTONES.length} unlocked`)}
+    </div>
+    <div class="section-title"><span>Titles</span></div>
+    <div class="panel">${TITLES.map(([l, t]) => kv(t, `Level ${l}`, '', lv.lvl >= l ? 'pos' : '')).join('')}</div>
+    <div style="height:18px"></div>
+    <button class="btn btn-primary btn-block" data-close>Got it</button>`);
 }
 
 function showRewards(list) {
@@ -1107,8 +1258,9 @@ function createTx(t) {
   Object.assign(t, { id: uid(), ts: Date.now(), xp: a.xp, mult: a.mult });
   if (t.type === 'expense') state.money.tx = state.money.tx.filter(x => !(x.type === 'nospend' && x.date === t.date));
   state.money.tx.push(t);
-  // Money sent home for the loan also counts as an extra loan payment
-  if (t.type === 'transfer' && t.purpose === 'extra' && state.loan && loanBalance() > 0) t.loanId = makeLoanEntry('extra', t.inr, t.date).id;
+  // Money sent home for the loan also counts as an extra loan payment (or links to one you already logged)
+  if (t.linkLoanId) { t.loanId = t.linkLoanId; delete t.linkLoanId; }
+  else if (t.type === 'transfer' && t.purpose === 'extra' && state.loan && loanBalance() > 0) t.loanId = makeLoanEntry('extra', t.inr, t.date).id;
   return t;
 }
 
@@ -1150,7 +1302,7 @@ const forms = {
   'f-loan-setup'(f) {
     const d = Object.fromEntries(new FormData(f));
     const err = msg => { $('#setup-err').textContent = msg; };
-    const loan = { name: d.name.trim() || 'Student loan', original: num(d.original), setupBalance: num(d.balance), rate: num(d.rate), emi: num(d.emi), setupDate: d.date, log: [] };
+    const loan = { name: d.name.trim() || 'Student loan', original: num(d.original), setupBalance: num(d.balance), rate: num(d.rate), emi: num(d.emi), setupDate: d.date, log: [], autoEmi: true };
     if (!(loan.original > 0 && loan.setupBalance > 0 && loan.rate > 0 && loan.emi > 0)) return err('Fill in all the numbers.');
     if (loan.setupBalance > loan.original) return err("The balance can't be more than the original loan.");
     const base = simulate(loan.setupBalance, 0, loan);
@@ -1173,6 +1325,14 @@ const forms = {
     const a = num($('#m-amt').value);
     if (!a) return $('#m-amt').focus();
     const date = $('#m-date').value || todayISO(), type = $('#f-pay').dataset.type;
+    // Duplicate guard
+    if (type === 'emi') {
+      const same = state.loan.log.find(e => e.type === 'emi' && e.date.slice(0, 7) === date.slice(0, 7));
+      if (same && !confirm(`An EMI for ${fmtMonth(parseISO(date))} is already logged. Log another one?`)) return;
+    } else {
+      const near = state.loan.log.find(e => e.type === 'extra' && Math.abs(parseISO(e.date) - parseISO(date)) <= 3 * 864e5 && state.money.tx.some(t => t.loanId === e.id));
+      if (near && !confirm(`You logged ${inr(near.amount)} on ${fmtDay(near.date)} through a transfer to India. Is this a different payment?`)) return;
+    }
     closeSheet();
     logPayment(type, a, date);
   },
@@ -1183,7 +1343,10 @@ const forms = {
     if (!amount) return err('Enter an amount.');
     if (!catId) return err('Pick a category.');
     const date = f.elements.date.value || todayISO(), note = f.elements.note.value.trim();
+    const useTreat = !!f.elements.treat?.checked;
+    if (useTreat && amount > treatBalance() + 0.004) return err(`Your treat fund has ${gbp(treatBalance())}.`);
     const t = { type, amount, cat: catId, note, date };
+    if (useTreat) t.treat = true;
     if (f.elements.recurring.checked) {
       const r = { id: uid(), type, amount, cat: catId, note, day: parseISO(date).getDate() };
       state.money.recurring.push(r);
@@ -1191,17 +1354,42 @@ const forms = {
     }
     closeSheet();
     moneyMonth = date.slice(0, 7);
-    addTx(t, x => `${x.note ? esc(x.note) : catOf(x.cat).name} <b>${type === 'income' ? '+' : '−'}${gbp(x.amount)}</b> · <b>${xpLabel(x)}</b>`);
+    addTx(t, x => {
+      let msg = `${x.note ? esc(x.note) : catOf(x.cat).name} <b>${type === 'income' ? '+' : '−'}${gbp(x.amount)}</b> · <b>${xpLabel(x)}</b>`;
+      if (x.treat) msg = `Guilt-free. Enjoy it. ${msg}`;
+      const b = type === 'expense' && budgetStatus(x.date.slice(0, 7)).find(y => y.id === x.cat);
+      if (b) msg += b.kept ? ` · ${gbp(b.left)} left in ${catOf(b.id).name}` : ` · <b>${catOf(b.id).name} over budget by ${gbp(-b.left)}</b>`;
+      return msg;
+    });
+  },
+
+  'f-budget'(f) {
+    const catId = f.elements.cat.value, limit = num(f.elements.limit.value), old = f.dataset.old;
+    if (!catId) return ($('#b-err').textContent = 'Pick a category.');
+    if (!limit) return ($('#b-err').textContent = 'Enter a monthly limit.');
+    if (old && old !== catId) delete state.money.budgets[old];
+    state.money.budgets[catId] = limit;
+    save();
+    closeSheet();
+    render();
+    toast(`${catOf(catId).name} budget set to <b>${gbp(limit)}</b> a month.`);
   },
 
   'f-transfer'(f) {
     const amount = num(f.elements.gbp.value), inrAmt = num(f.elements.inr.value), purpose = f.elements.purpose.value;
     if (!amount || !inrAmt) return ($('#tr-err').textContent = 'Enter both the pounds sent and the rupees received.');
     const date = f.elements.date.value || todayISO();
+    const t0 = { type: 'transfer', amount, inr: inrAmt, purpose, date };
+    // Duplicate guard: an extra payment already logged by hand in the loan tracker around the same date?
+    if (purpose === 'extra' && state.loan) {
+      const near = state.loan.log.find(e => e.type === 'extra' && Math.abs(parseISO(e.date) - parseISO(date)) <= 3 * 864e5 && !state.money.tx.some(t => t.loanId === e.id));
+      if (near && confirm(`You logged ${inr(near.amount)} as an extra loan payment on ${fmtDay(near.date)}. Is this transfer that same money?\n\nOK = yes, link them (no double counting)\nCancel = no, it's a new payment`)) t0.linkLoanId = near.id;
+    }
     closeSheet();
     moneyMonth = date.slice(0, 7);
-    addTx({ type: 'transfer', amount, inr: inrAmt, purpose, date }, t => {
+    addTx(t0, t => {
       const e = t.loanId && state.loan.log.find(x => x.id === t.loanId);
+      if (e && e.ts < t.ts) return `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> · linked to your extra payment · <b>${xpLabel(t)}</b>`;
       return e
         ? `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> · loan ${dur(e.monthsRemoved)} sooner · <b>+${t.xp + e.xp} XP</b>`
         : `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> at ₹${(t.inr / t.amount).toFixed(2)} · <b>${xpLabel(t)}</b>`;
@@ -1289,11 +1477,24 @@ function act(a, el) {
       save(); render();
       return;
     case 'claim-month': {
-      const m = monthStats(d.ym), gr = gradeFor(m), g0 = globalStats();
-      state.money.closed[d.ym] = { grade: gr.grade, score: gr.score, xp: gr.xp, ptw: m.ptw ?? 0, ts: Date.now() };
+      const c = closeSummary(d.ym), g0 = globalStats();
+      state.money.closed[d.ym] = { grade: c.gr.grade, score: c.gr.score, xp: c.xp, ptw: c.m.ptw ?? 0, budgetsKept: c.kept, treat: c.treat, ts: Date.now() };
       save(); closeSheet(); render();
-      return finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${gr.grade}</b> · <b>+${gr.xp} XP</b>`, { big: true });
+      return finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>${c.treat ? ` · <b>${gbp(c.treat)}</b> added to your treat fund` : ''}`, { big: true });
     }
+    case 'xp-help': return xpSheet();
+    case 'budget-new': return budgetSheet();
+    case 'budget-edit': return budgetSheet(d.id);
+    case 'budget-del':
+      delete state.money.budgets[d.id];
+      save(); closeSheet(); render();
+      return toast('Budget removed.');
+    case 'treat-spend': return txSheet('expense', { treat: true });
+    case 'auto-emi':
+      state.loan.autoEmi = state.loan.autoEmi === false;
+      save(); render();
+      if (state.loan.autoEmi) runAutoEmi();
+      return toast(state.loan.autoEmi ? 'Your EMI will now log itself every month.' : 'Automatic EMI logging is off. Log it by hand each month.');
     case 'leftover': closeSheet(); return transferSheet(d.amt);
     case 'remove-loan':
       if (!confirm('Remove the loan tracker and all its history?')) return;
@@ -1489,7 +1690,9 @@ addEventListener('popstate', ev => {
 load();
 history.replaceState({ v: 'home' }, '');
 render();
-if (state) setTimeout(weeklyRecap, 700);
+if (state) setTimeout(() => { runAutoEmi(); weeklyRecap(); }, 700);
+// When you come back to the app (it may have stayed open in the background), catch up on EMIs
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && state) runAutoEmi(); });
 
 // Offline support + "install as app" (only works on a real web address)
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js');
