@@ -6,6 +6,10 @@
 *.xlsx
 *.csv
 lifequest-backup-*.json
+compound-backup-*.json
 
 # Local-only tool settings
 .claude/settings.local.json
+
+# Local dev tools
+.tools/

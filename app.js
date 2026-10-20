@@ -725,7 +725,6 @@ function moneyView() {
   const trend = [-5, -4, -3, -2, -1, 0].map(i => monthStats(ymAdd(ym, i)));
   const maxT = Math.max(1, ...trend.flatMap(t => [t.income, t.out]));
   const monthTx = state.money.tx.filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
-  const biggest = monthTx.filter(t => t.type === 'expense').sort((a, b) => b.amount - a.amount).slice(0, 5);
   const today = todayISO();
   const canNoSpend = isNow && !state.money.tx.some(t => t.date === today && (t.type === 'expense' || t.type === 'nospend'));
   const canClose = ym < ymNow() && m.txCount && !closed;
@@ -795,8 +794,10 @@ function moneyView() {
 
     ${isNow ? habitsCard() : ''}
 
+    ${mixCard(m)}
+
     <div class="section-title"><span>Where it went</span><span>vs ${ymLabel(prev.ym, { month: 'short' })}</span></div>
-    <section class="panel">${cats.length ? cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, cats[0][1])).join('') : '<p class="empty">No spending logged this month.</p>'}</section>
+    <section class="panel">${cats.length ? cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, cats[0][1], m.living)).join('') : '<p class="empty">No spending logged this month.</p>'}</section>
 
     <div class="section-title"><span>Six months</span><span class="key"><i class="sw in"></i>In <i class="sw out"></i>Out</span></div>
     <section class="panel pad">
@@ -804,9 +805,6 @@ function moneyView() {
         <div class="bars"><i class="in" style="height:${(t.income / maxT) * 100}%"></i><i class="out" style="height:${(t.out / maxT) * 100}%"></i></div>
         <span class="lbl">${ymLabel(t.ym, { month: 'short' })}</span></button>`).join('')}</div>
     </section>
-
-    ${biggest.length ? `<div class="section-title"><span>Biggest expenses</span></div>
-    <section class="panel">${biggest.map(t => kv(esc(t.note || catOf(t.cat).name), gbp(t.amount), `${catOf(t.cat).name} · ${fmtDayShort(t.date)}`)).join('')}</section>` : ''}
 
     <div class="section-title"><span>Transactions</span><span>${monthTx.length || ''}</span></div>
     <section class="panel">${txHtml || '<p class="empty">Nothing logged this month yet.</p>'}</section>
@@ -847,9 +845,58 @@ function budgetRow(b, ym) {
       <div class="d">${status}</div></div></button>`;
 }
 
-function catRow(id, v, last, max) {
+// Spending mix: categories folded into six fixed groups, each with its own fixed colour
+const GROUPS = [
+  { id: 'home', name: 'Home', cats: ['rent', 'bills', 'household'] },
+  { id: 'food', name: 'Food', cats: ['groceries', 'takeaway', 'eatingout'] },
+  { id: 'move', name: 'Getting around', cats: ['transport', 'travel'] },
+  { id: 'life', name: 'Lifestyle', cats: ['subscriptions', 'shopping', 'leisure', 'health', 'gifts', 'other'] },
+  { id: 'habits', name: 'Habits', cats: ['alcohol', 'snus', 'vape'] },
+  { id: 'career', name: 'Career and visa', cats: ['cima', 'visa'] },
+];
+const groupOf = catId => GROUPS.find(g => g.cats.includes(catId)) || GROUPS[3];
+const pctOf = (v, total) => { const p = (v / total) * 100; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
+const MIX_HINT = 'Tap a colour or a row for details';
+
+function mixCard(m) {
+  if (!m.living) return '';
+  const groups = GROUPS.map((g, i) => {
+    const cats = Object.entries(m.byCat).filter(([id]) => groupOf(id) === g).sort((a, b) => b[1] - a[1]);
+    const total = sum(cats, c => c[1]);
+    return { ...g, slot: i + 1, total, cats, cap: `<b>${g.name}</b> · ${pctOf(total, m.living)} of living costs · ${gbp(total)}` };
+  }).filter(g => g.total > 0);
+  const bar = groups.map(g =>
+    `<button class="seg" style="flex:${g.total} 1 0;background:var(--s${g.slot})" data-act="mix" data-g="${g.id}" data-cap="${esc(g.cap)}" aria-label="${g.name}, ${pctOf(g.total, m.living)}, ${gbp(g.total)}"></button>`).join('');
+  const legend = [...groups].sort((a, b) => b.total - a.total).map(g => `
+    <button class="mix-row" data-act="mix" data-g="${g.id}" data-cap="${esc(g.cap)}">
+      <i class="sw" style="background:var(--s${g.slot})"></i>
+      <div class="main">
+        <div class="n"><span>${g.name}</span><b>${pctOf(g.total, m.living)}</b></div>
+        <div class="d">${gbp(g.total)} · ${g.cats.map(([id, v]) => `${catOf(id).name} ${gbp(v)}`).join(' · ')}</div>
+      </div>
+    </button>`).join('');
+  return `<div class="section-title"><span>Spending mix</span><span>${gbp(m.living)} living costs</span></div>
+    <section class="panel pad mix" id="mix">
+      <div class="mix-bar">${bar}</div>
+      <div class="mix-cap" id="mix-cap">${MIX_HINT}</div>
+      ${legend}
+    </section>`;
+}
+
+// Highlight one group in the spending mix (tap again to clear)
+function focusMix(groupId) {
+  const box = $('#mix');
+  if (!box) return;
+  const on = box.dataset.active === groupId ? '' : groupId;
+  box.dataset.active = on;
+  box.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('dim', !!on && x.dataset.g !== on));
+  $('#mix-cap').innerHTML = on ? box.querySelector(`.mix-row[data-g="${on}"]`).dataset.cap : MIX_HINT;
+}
+
+function catRow(id, v, last, max, total) {
   const c = catOf(id), diff = v - last;
-  const d = !last ? 'New this month' : Math.abs(diff) < 0.5 ? 'Same as last month' : `${diff > 0 ? '↑' : '↓'} ${gbp(Math.abs(diff))} vs last month`;
+  const change = !last ? 'New this month' : Math.abs(diff) < 0.5 ? 'Same as last month' : `${diff > 0 ? '↑' : '↓'} ${gbp(Math.abs(diff))} vs last month`;
+  const d = `${pctOf(v, total)} of spending · ${change}`;
   const cls = last && diff > 0.5 ? 'neg' : last && diff < -0.5 ? 'pos' : '';
   return `<div class="cat-row"><div class="mark">${icon(c.icon)}</div><div class="main">
     <div class="n"><span>${c.name}</span><b>${gbp(v)}</b></div>
@@ -1514,6 +1561,7 @@ function act(a, el) {
       save(); closeSheet(); render();
       return finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>${c.treat ? ` · <b>${gbp(c.treat)}</b> added to your treat fund` : ''}`, { big: true });
     }
+    case 'mix': return focusMix(d.g);
     case 'xp-help': return xpSheet();
     case 'budget-new': return budgetSheet();
     case 'budget-edit': return budgetSheet(d.id);
@@ -1696,6 +1744,17 @@ document.addEventListener('click', ev => {
   if ('back' in el.dataset) return history.back();
   if (el.dataset.soon) { sfx.tap(); return toast(`<b>${el.dataset.soon}</b> arrives in a coming update.`); }
   act(el.dataset.act, el);
+});
+// Spending mix: hovering a segment (mouse) previews its details
+document.addEventListener('pointerover', ev => {
+  const s = ev.target.closest?.('.seg');
+  if (s && ev.pointerType === 'mouse') $('#mix-cap').innerHTML = s.dataset.cap;
+});
+document.addEventListener('pointerout', ev => {
+  const s = ev.target.closest?.('.seg');
+  if (!s || ev.pointerType !== 'mouse') return;
+  const box = $('#mix'), on = box?.dataset.active;
+  $('#mix-cap').innerHTML = on ? box.querySelector(`.mix-row[data-g="${on}"]`).dataset.cap : MIX_HINT;
 });
 document.addEventListener('submit', ev => {
   ev.preventDefault();

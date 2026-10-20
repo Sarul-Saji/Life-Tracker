@@ -430,6 +430,24 @@ button.cat-row { width: 100%; text-align: left; }
 .profile-head .small-btn { padding-top: 10px; }
 .profile-head .small-btn svg { color: var(--muted); }
 
+/* Spending mix chart. Series colours are validated for colour-blind
+   separation in both modes; text never takes the series colour. */
+:root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; }
+@media (prefers-color-scheme: dark) {
+  :root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; }
+}
+.mix-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; }
+.mix-bar .seg { min-width: 4px; height: 100%; padding: 0; transition: opacity .2s; }
+.mix-cap { font-size: 13px; color: var(--muted); margin: 10px 0 4px; min-height: 20px; }
+.mix-cap b { color: var(--ink); font-weight: 600; }
+.mix-row { display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left; padding: 12px 0; border-top: 1px solid var(--line); transition: opacity .2s; }
+.mix-row .sw { width: 10px; height: 10px; border-radius: 3px; margin: 5px 0 0; }
+.mix-row .main { flex: 1; min-width: 0; }
+.mix-row .n { display: flex; justify-content: space-between; font-size: 14.5px; }
+.mix-row .n b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mix-row .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.mix .dim { opacity: .3; }
+
 /* Habits card */
 .habit { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
 .habit .mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); color: var(--muted); flex: none; }
