@@ -94,6 +94,9 @@ const ICONS = {
   passport: '<rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="3"/><path d="M9 16h6"/>',
   sparkle: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6"/>',
   target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8"/>',
+  glass: '<path d="M8 3h8l-.5 6a3.5 3.5 0 0 1-7 0Z"/><path d="M12 12.5V20M8.5 20h7"/>',
+  tin: '<ellipse cx="12" cy="9" rx="8" ry="3"/><path d="M4 9v5c0 1.7 3.6 3 8 3s8-1.3 8-3V9"/>',
+  vape: '<rect x="9" y="8" width="6" height="13" rx="2"/><path d="M11 8V5h2v3M12 12v3M10 3c.7-.7 1.3-.7 2 0s1.3.7 2 0"/>',
 };
 const icon = name => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.dots}</svg>`;
 const LOGO = `<svg class="logo" viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="var(--ink)"/><path d="M24 74H76" stroke="var(--muted)" stroke-width="2" stroke-linecap="round"/><path d="M24 70C50 70 62 60 72 30" fill="none" stroke="var(--gold)" stroke-width="3.5" stroke-linecap="round"/><circle cx="72" cy="30" r="4.5" fill="var(--bg)"/></svg>`;
@@ -238,9 +241,19 @@ const cat = (id, name, ic) => ({ id, name, icon: ic });
 const EXPENSE_CATS = [
   cat('rent', 'Rent', 'home'), cat('bills', 'Bills', 'bolt'), cat('groceries', 'Groceries', 'basket'), cat('household', 'Household', 'bottle'),
   cat('takeaway', 'Takeaways', 'bag'), cat('eatingout', 'Eating out', 'fork'), cat('transport', 'Transport', 'train'), cat('subscriptions', 'Subscriptions', 'repeat'),
-  cat('shopping', 'Shopping', 'tag'), cat('leisure', 'Leisure', 'ticket'), cat('health', 'Health', 'heart'), cat('travel', 'Travel', 'plane'),
-  cat('cima', 'CIMA', 'cap'), cat('visa', 'Visa fee', 'passport'), cat('gifts', 'Gifts', 'gift'), cat('other', 'Other', 'dots'),
+  cat('alcohol', 'Alcohol', 'glass'), cat('snus', 'Snus', 'tin'), cat('vape', 'Vape', 'vape'), cat('shopping', 'Shopping', 'tag'),
+  cat('leisure', 'Leisure', 'ticket'), cat('health', 'Health', 'heart'), cat('travel', 'Travel', 'plane'), cat('cima', 'CIMA', 'cap'),
+  cat('visa', 'Visa fee', 'passport'), cat('gifts', 'Gifts', 'gift'), cat('other', 'Other', 'dots'),
 ];
+// Habit spending gets its own card: what it costs over a year, and what it would do for the loan
+const HABIT_CATS = ['alcohol', 'snus', 'vape'];
+function habitStats() {
+  const today = todayISO(), since = addDays(today, -29);
+  const recent = state.money.tx.filter(t => t.type === 'expense' && HABIT_CATS.includes(t.cat));
+  const per = HABIT_CATS.map(id => ({ id, last30: sum(recent.filter(t => t.cat === id && t.date >= since && t.date <= today), t => t.amount) }));
+  const total = sum(per, p => p.last30);
+  return { per, total, yearly: (total * 365) / 30, any: recent.some(t => t.date >= addDays(today, -89)) };
+}
 const INCOME_CATS = [cat('salary', 'Salary', 'briefcase'), cat('tips', 'Tips', 'coins'), cat('refund', 'Refund', 'undo'), cat('otherin', 'Other', 'dots')];
 const PURPOSES = { emi: 'Loan EMI', extra: 'Loan extra', savings: 'Savings', family: 'Family' };
 const catOf = id => [...EXPENSE_CATS, ...INCOME_CATS].find(c => c.id === id) || cat(id, 'Other', 'dots');
@@ -780,6 +793,8 @@ function moneyView() {
       <p class="treat-note">${closed ? `${ymLabel(ym, { month: 'long' })} added ${gbp(closed.treat || 0)}.` : `${isNow ? 'This month is on track to add' : 'Closing this month adds'} <b>${gbp(treatFor(m))}</b>${isNow ? ' when you close it' : ''}.`}</p>
     </section>
 
+    ${isNow ? habitsCard() : ''}
+
     <div class="section-title"><span>Where it went</span><span>vs ${ymLabel(prev.ym, { month: 'short' })}</span></div>
     <section class="panel">${cats.length ? cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, cats[0][1])).join('') : '<p class="empty">No spending logged this month.</p>'}</section>
 
@@ -799,6 +814,23 @@ function moneyView() {
     <div class="section-title"><span>Recurring</span></div>
     <section class="panel">${state.money.recurring.length ? state.money.recurring.map(recItem).join('') : '<p class="empty">Tick "Repeat every month" when logging rent, salary or subscriptions, and they will show up here.</p>'}</section>
   </div>`;
+}
+
+function habitsCard() {
+  const h = habitStats();
+  if (!h.any) return '';
+  let loanLine = '';
+  const rate = latestRate();
+  if (state.loan && rate && h.total > 0) {
+    const bal = Math.max(0, loanBalance()), base = simulate(bal), plan = simulate(bal, h.total * rate);
+    const months = base.months - plan.months;
+    if (months >= 0.1) loanLine = ` Sent to the loan instead, that's <b>${dur(months)}</b> sooner debt-free.`;
+  }
+  return `<div class="section-title"><span>Habits</span><span>Last 30 days</span></div>
+    <section class="panel pad habits">
+      ${h.per.map(p => { const c = catOf(p.id); return `<div class="habit"><span class="mark">${icon(c.icon)}</span><span class="name">${c.name}</span><b>${gbp(p.last30)}</b></div>`; }).join('')}
+      <p class="treat-note">On pace for <b>${gbp(Math.round(h.yearly))} a year</b>.${loanLine}</p>
+    </section>`;
 }
 
 function budgetRow(b, ym) {
