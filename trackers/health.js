@@ -13,7 +13,7 @@ const DEFAULT_MEALS = [
   { id: 'm-caesar', name: 'Chicken Caesar salad', kcal: 700, protein: 45 },
   { id: 'm-chickenrice', name: 'Chicken and rice', kcal: 650, protein: 60 },
 ];
-const GYM_TYPES = [['push', 'Push', 5], ['pull', 'Pull', 5], ['legs', 'Legs', 5.5], ['upper', 'Upper', 5], ['full', 'Full body', 5.5], ['cardio', 'Cardio', 7.5], ['other', 'Other', 5]];
+const GYM_KCAL_PER_KG_HOUR = 4;   // deliberately conservative: gym trackers tend to overstate burn
 const GOALS = { lose: { name: 'Lose fat', adj: -500 }, maintain: { name: 'Maintain', adj: 0 }, build: { name: 'Build muscle', adj: 300 } };
 const WATER_GOAL = 8;
 const H_XP = { food: 10, water: 3, gym: 60, weights: 15 };
@@ -22,8 +22,8 @@ const H = () => state.health;
 
 const bmr = p => 10 * p.weightKg + 6.25 * p.heightCm - 5 * p.age + (p.sex === 'f' ? -161 : 5);
 const dayType = date => (H() && H().rota[date]) || '';
-const gymName = id => (GYM_TYPES.find(g => g[0] === id) || GYM_TYPES[6])[1];
-const gymKcal = (type, mins) => Math.round((GYM_TYPES.find(g => g[0] === type) || GYM_TYPES[0])[2] * H().profile.weightKg * mins / 60);
+// Older sessions keep the type and calories they were saved with; new ones are estimated from duration only
+const gymKcal = mins => Math.round(H().profile.weightKg * mins / 60 * GYM_KCAL_PER_KG_HOUR);
 const proteinTarget = () => Math.round(H().profile.weightKg * 1.6);
 
 function dayTarget(date) {
@@ -231,7 +231,7 @@ function foodItem(e) {
 function gymItem(s) {
   return `<div class="hist gymrow">
     <div class="mark">${icon('dumbbell')}</div>
-    <div class="main"><div class="t">${gymName(s.type)} <span>· ${fmtDayShort(s.date)}</span></div><div class="s">${s.mins} min · ~${s.kcal} kcal</div></div>
+    <div class="main"><div class="t">${fmtDayShort(s.date)}</div><div class="s">${s.mins} min · ~${s.kcal} kcal</div></div>
     <div class="amt">${s.xp ? `<small>+${s.xp} XP</small>` : ''}</div>
     <button class="del" data-act="h-del" data-kind="gym" data-id="${s.id}" aria-label="Remove">${icon('x')}</button>
   </div>`;
@@ -383,7 +383,6 @@ function gymSheet() {
     <h2>Log a session</h2>
     <p class="lead">Any day counts. On a shift day it's a double win, with +${SHIFT_GYM_BONUS} bonus XP.</p>
     <form id="f-gym">
-      <div class="field-label">Type</div>${chips('type', GYM_TYPES.map(g => [g[0], g[1]]), 'push')}
       <div class="field-label">Duration</div>${chips('mins', [30, 45, 60, 75, 90].map(m => [String(m), `${m} min`]), '60')}
       <label class="field"><span>Date</span><input name="date" type="date" value="${todayISO()}"></label>
       <div class="preview" id="g-preview"></div>
@@ -395,7 +394,7 @@ function gymSheet() {
 function updateGymPreview() {
   const f = $('#f-gym');
   if (!f) return;
-  const k = gymKcal(f.elements.type.value, Number(f.elements.mins.value)), onShift = dayType(f.elements.date.value) === 'shift';
+  const k = gymKcal(Number(f.elements.mins.value)), onShift = dayType(f.elements.date.value) === 'shift';
   $('#g-preview').innerHTML = kv('Estimated burn', `~${k} kcal`, "added to that day's calorie target")
     + kv('Reward', `+${award(H_XP.gym + (onShift ? SHIFT_GYM_BONUS : 0)).xp} XP`, onShift ? `includes +${SHIFT_GYM_BONUS} shift-day bonus` : '');
 }
@@ -547,13 +546,13 @@ const healthForms = {
   },
 
   'f-gym'(f) {
-    const type = f.elements.type.value, mins = Number(f.elements.mins.value), date = f.elements.date.value || todayISO();
+    const mins = Number(f.elements.mins.value), date = f.elements.date.value || todayISO();
     closeSheet();
     // Training on a shift day is a double win: on your feet all shift and in the gym
     const onShift = dayType(date) === 'shift';
-    addHealth('gym', { type, mins, date, kcal: gymKcal(type, mins), ...(onShift ? { bonus: SHIFT_GYM_BONUS } : {}) }, e => {
+    addHealth('gym', { mins, date, kcal: gymKcal(mins), ...(onShift ? { bonus: SHIFT_GYM_BONUS } : {}) }, e => {
       const n = healthStats().thisWeek, target = H().settings.gymTarget;
-      return `${onShift ? '<b>Shift and gym, double win.</b> ' : ''}${gymName(type)} · ${mins} min · ~${e.kcal} kcal · <b>${n} of ${target}</b> this week${n === target ? ' · <b>target hit</b>' : ''} · <b>${xpLabel(e)}</b>`;
+      return `${onShift ? '<b>Shift and gym, double win.</b> ' : ''}Gym · ${mins} min · ~${e.kcal} kcal · <b>${n} of ${target}</b> this week${n === target ? ' · <b>target hit</b>' : ''} · <b>${xpLabel(e)}</b>`;
     }, true);
   },
 };
