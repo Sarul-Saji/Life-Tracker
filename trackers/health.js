@@ -16,7 +16,7 @@ const DEFAULT_MEALS = [
 const GYM_TYPES = [['push', 'Push', 5], ['pull', 'Pull', 5], ['legs', 'Legs', 5.5], ['upper', 'Upper', 5], ['full', 'Full body', 5.5], ['cardio', 'Cardio', 7.5], ['other', 'Other', 5]];
 const GOALS = { lose: { name: 'Lose fat', adj: -500 }, maintain: { name: 'Maintain', adj: 0 }, build: { name: 'Build muscle', adj: 300 } };
 const WATER_GOAL = 8;
-const H_XP = { food: 10, water: 3, gym: 60 };
+const H_XP = { food: 10, water: 3, gym: 60, weights: 15 };
 const SHIFT_GYM_BONUS = 40;   // extra XP for training on a shift day
 const H = () => state.health;
 
@@ -49,7 +49,7 @@ function fuelDay(date) {
   return { kcal, protein, water, fries, shift, t, score, grade };
 }
 
-const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0 };
+const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0 };
 function healthStats() {
   const h = H();
   if (!h) return ZERO_HEALTH;
@@ -70,7 +70,66 @@ function healthStats() {
     fuelA: fuel.filter(f => f.grade === 'A').length,
     water8: Object.values(waterByDay).filter(n => n >= WATER_GOAL).length,
     doubles: new Set(h.gym.filter(s => dayType(s.date) === 'shift').map(s => s.date)).size,
+    weighs: weighIns().length,
+    weighWeeks: new Set(weighIns().map(w => weekStart(w.date))).size,
   };
+}
+
+/* ---------- Weight ----------
+   Weight swings 1–2 kg day to day with water and salt, so the 7-day average (not any single
+   reading) is what shows whether the calorie target is working. Entries saved from "Your details"
+   have no ts and earn no XP; weigh-ins logged from the Weight panel do. */
+let hWeightRange = 90;   // days shown on the chart (0 = all)
+const weighIns = () => H().weights.filter(w => w.ts);
+const hDaysBetween = (a, b) => Math.round((parseISO(b) - parseISO(a)) / 864e5);
+const kgFmt = n => n.toFixed(1);
+
+// One reading per day (the last one saved that day), oldest first, each with its 7-day average
+function weightSeries() {
+  const byDay = {};
+  H().weights.forEach(w => { byDay[w.date] = w; });
+  const days = Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date));
+  return days.map(w => {
+    const from = addDays(w.date, -6), win = days.filter(x => x.date >= from && x.date <= w.date);
+    return { date: w.date, kg: w.kg, avg: sum(win, x => x.kg) / win.length };
+  });
+}
+
+// kg per week over the last 4 weeks (straight-line fit), or null until there's enough to judge
+function weightRate(series) {
+  if (!series.length) return null;
+  const last = series[series.length - 1].date, pts = series.filter(p => p.date > addDays(last, -28));
+  if (pts.length < 4 || hDaysBetween(pts[0].date, last) < 10) return null;
+  const xs = pts.map(p => hDaysBetween(pts[0].date, p.date)), mx = sum(xs, x => x) / xs.length, my = sum(pts, p => p.kg) / pts.length;
+  let top = 0, bottom = 0;
+  pts.forEach((p, i) => { top += (xs[i] - mx) * (p.kg - my); bottom += (xs[i] - mx) ** 2; });
+  return (top / bottom) * 7;
+}
+
+// Plain-English read of the trend against the goal; the nudges are ±200 kcal so changes stay small
+function weightVerdict(rate, goal, kg) {
+  if (rate == null) return 'Weigh in 3 or 4 times a week, first thing in the morning. After about two weeks this tells you whether your calorie target is right.';
+  const r = `${kgFmt(Math.abs(rate))} kg a week`;
+  if (goal === 'lose') {
+    if (rate <= -0.01 * kg) return `Losing about <b>${r}</b>. That's fast: fine for a few weeks, but eat a little more if training feels flat, or you'll lose muscle too.`;
+    if (rate <= -0.2) return `Losing about <b>${r}</b>. Right on track.`;
+    if (rate < -0.05) return `Losing slowly, about <b>${r}</b>. Still progress. Eat about 200 kcal a day less if you want it faster.`;
+    return `<b>Not losing yet.</b> Your real burn is probably lower than the estimate. Lower the shift-day calories in Your details by 200, or eat about 200 less a day.`;
+  }
+  if (goal === 'build') {
+    if (rate >= 0.45) return `Gaining about <b>${r}</b>. Faster than muscle can grow, so some of it is fat. Try about 200 kcal a day less.`;
+    if (rate >= 0.1) return `Gaining about <b>${r}</b>. A good pace for building muscle.`;
+    return `<b>Not gaining yet.</b> To build muscle you need a small surplus. Try about 200 kcal a day more.`;
+  }
+  if (Math.abs(rate) <= 0.2) return `<b>Holding steady</b> (within ${r}). Your target fits.`;
+  return rate > 0 ? `Creeping up about <b>${r}</b>. Your target may be a bit high. Try about 200 kcal a day less.`
+    : `Drifting down about <b>${r}</b>. Your target may be a bit low. Try about 200 kcal a day more.`;
+}
+
+// The latest reading becomes the weight your calorie and protein targets use
+function syncWeight() {
+  const h = H(), latest = [...h.weights].sort((a, b) => a.date.localeCompare(b.date)).pop();
+  if (latest) h.profile.weightKg = latest.kg;
 }
 
 /* Screens */
@@ -152,6 +211,8 @@ function healthView() {
     </section>
     ${sessions.length ? `<section class="panel" style="margin-top:12px">${sessions.map(gymItem).join('')}</section>` : ''}
 
+    ${weightSection()}
+
     <button class="details-btn" data-act="h-settings">
       <span>Your details</span><small>${GOALS[h.profile.goal].name} · ${h.profile.weightKg} kg · gym ${target}/week</small>${icon('chevR')}
     </button>
@@ -175,6 +236,88 @@ function gymItem(s) {
     <button class="del" data-act="h-del" data-kind="gym" data-id="${s.id}" aria-label="Remove">${icon('x')}</button>
   </div>`;
 }
+
+function weightSection() {
+  const h = H(), s = weightSeries(), last = s[s.length - 1], rate = weightRate(s);
+  const ago = last ? hDaysBetween(last.date, todayISO()) : 0, span = last ? hDaysBetween(s[0].date, last.date) : 0;
+  const when = !last ? '' : ago <= 0 ? 'Weighed today' : ago === 1 ? 'Weighed yesterday' : `Last weighed ${ago} days ago`;
+  const recent = [...h.weights].sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0)).slice(0, 3);
+  return `<div class="section-title"><span>Weight</span><span>${when}</span></div>
+    <section class="panel pad weight">
+      <div class="gym-top">
+        <div><div class="big">${last ? kgFmt(last.avg) : '–'}<small> kg</small></div><div class="muted small">${s.length > 1 ? '7-day average' : 'your last reading'}</div></div>
+        <button class="btn btn-primary btn-sm" data-act="weigh">Weigh in</button>
+      </div>
+      ${s.length >= 2 ? `${span > 35 ? `<div class="w-range">${[[30, '1M'], [90, '3M'], [0, 'All']].map(([d, l]) =>
+            `<button class="${hWeightRange === d ? 'on' : ''}" data-act="w-range" data-d="${d}">${l}</button>`).join('')}</div>` : ''}
+        <div id="w-chart" class="w-chart"></div>
+        <div class="w-legend"><span><i class="k-dot"></i>Weigh-in</span><span><i class="k-line"></i>7-day average</span></div>` : ''}
+      <p class="treat-note w-note">${weightVerdict(rate, h.profile.goal, h.profile.weightKg)}</p>
+    </section>
+    ${recent.length ? `<section class="panel" style="margin-top:12px">${recent.map(weighItem).join('')}</section>` : ''}`;
+}
+
+function weighItem(w) {
+  return `<div class="hist weighrow">
+    <div class="mark">${icon('target')}</div>
+    <div class="main"><div class="t">${kgFmt(w.kg)} kg</div><div class="s">${fmtDayShort(w.date)}${w.ts ? '' : ' · from Your details'}</div></div>
+    <div class="amt">${w.xp ? `<small>+${w.xp} XP</small>` : ''}</div>
+    <button class="del" data-act="h-del" data-kind="weights" data-id="${w.id}" aria-label="Remove">${icon('x')}</button>
+  </div>`;
+}
+
+// Drawn after render so it can measure its real width (crisp text and round dots at any screen size)
+function drawWeightChart() {
+  const box = $('#w-chart');
+  if (!box || !state.health) return;
+  const all = weightSeries(), end = all[all.length - 1].date;
+  let P = hWeightRange ? all.filter(p => p.date > addDays(end, -hWeightRange)) : all;
+  if (P.length < 2) P = all.slice(-2);
+  const W = box.clientWidth, HT = box.clientHeight, L = 34, R = 10, T = 8, B = 24;
+  const span = Math.max(1, hDaysBetween(P[0].date, end)), vals = P.flatMap(p => [p.kg, p.avg]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const range = Math.max(hi - lo, 1), step = range <= 2 ? 0.5 : range <= 5 ? 1 : range <= 10 ? 2 : 5;
+  lo = Math.floor((lo - 0.2) / step) * step;
+  hi = Math.ceil((hi + 0.2) / step) * step;
+  const x = d => L + (hDaysBetween(P[0].date, d) / span) * (W - L - R);
+  const y = v => T + ((hi - v) / (hi - lo)) * (HT - T - B);
+  const short = d => parseISO(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  let grid = '';
+  for (let v = lo; v <= hi + 1e-9; v += step) {
+    grid += `<line class="w-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="w-tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${step < 1 ? v.toFixed(1) : v.toFixed(0)}</text>`;
+  }
+  const xl = [[P[0].date, 'start'], ...(span >= 21 ? [[addDays(P[0].date, Math.round(span / 2)), 'middle']] : []), [end, 'end']];
+  const r = P.length > 40 ? 3 : 4;
+  box.innerHTML = `<svg width="${W}" height="${HT}" role="img" aria-label="Weight from ${kgFmt(P[0].avg)} to ${kgFmt(P[P.length - 1].avg)} kg (7-day average), ${short(P[0].date)} to ${short(end)}">
+      ${grid}
+      ${xl.map(([d, a]) => `<text class="w-tick" x="${x(d)}" y="${HT - 6}" text-anchor="${a}">${short(d)}</text>`).join('')}
+      ${P.map(p => `<circle class="w-dot" cx="${x(p.date)}" cy="${y(p.kg)}" r="${r}"/>`).join('')}
+      <path class="w-line" d="${P.map((p, i) => `${i ? 'L' : 'M'}${x(p.date).toFixed(1)},${y(p.avg).toFixed(1)}`).join('')}"/>
+      <circle class="w-end" cx="${x(end)}" cy="${y(P[P.length - 1].avg)}" r="4.5"/>
+      <line class="w-cross" x1="0" x2="0" y1="${T}" y2="${HT - B}" style="display:none"/>
+      <circle class="w-hi" r="5" style="display:none"/>
+    </svg>
+    <div class="w-tip" hidden><div><b></b> <span>7-day average</span></div><div class="w-tip-kg"></div><div class="w-tip-d"></div></div>`;
+  const svg = box.firstElementChild, tip = box.querySelector('.w-tip'), cross = box.querySelector('.w-cross'), dot = box.querySelector('.w-hi');
+  // The crosshair snaps to the nearest weigh-in, so you never have to hit a dot exactly
+  const show = ev => {
+    const px = ev.clientX - svg.getBoundingClientRect().left;
+    const p = P.reduce((b, q) => (Math.abs(x(q.date) - px) < Math.abs(x(b.date) - px) ? q : b));
+    const cx = x(p.date);
+    cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.style.display = '';
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', y(p.avg)); dot.style.display = '';
+    tip.querySelector('b').textContent = `${kgFmt(p.avg)} kg`;
+    tip.querySelector('.w-tip-kg').textContent = `${kgFmt(p.kg)} kg on the scale`;
+    tip.querySelector('.w-tip-d').textContent = fmtDayShort(p.date);
+    tip.hidden = false;
+    tip.style.left = cx > W / 2 ? `${L + 6}px` : '';
+    tip.style.right = cx > W / 2 ? '' : `${R + 6}px`;
+  };
+  svg.addEventListener('pointerdown', show);
+  svg.addEventListener('pointermove', show);
+  svg.addEventListener('pointerleave', ev => { if (ev.pointerType === 'mouse') { tip.hidden = true; cross.style.display = dot.style.display = 'none'; } });
+}
+addEventListener('resize', () => drawWeightChart());
 
 function healthFields(p, s) {
   const chips = (name, opts, val) => `<div class="purposes">${opts.map(([v, l]) =>
@@ -257,6 +400,22 @@ function updateGymPreview() {
     + kv('Reward', `+${award(H_XP.gym + (onShift ? SHIFT_GYM_BONUS : 0)).xp} XP`, onShift ? `includes +${SHIFT_GYM_BONUS} shift-day bonus` : '');
 }
 
+function weighSheet() {
+  const s = weightSeries(), last = s[s.length - 1];
+  openSheet(`
+    <h2>Weigh in</h2>
+    <p class="lead">Weigh at the same time each day: first thing in the morning, before eating. Daily ups and downs are normal; the 7-day average is what counts.</p>
+    <form id="f-weigh">
+      <div class="grid2">
+        <label class="field"><span>Weight (kg)</span><input name="kg" ${moneyAttrs('kg')} placeholder="${last ? kgFmt(last.kg) : '0.0'}"></label>
+        <label class="field"><span>Date</span><input name="date" type="date" value="${todayISO()}" max="${todayISO()}"></label>
+      </div>
+      <div id="w-err" class="err"></div>
+      ${sheetButtons('Save')}
+    </form>`);
+  setTimeout(() => $('#f-weigh [name=kg]')?.focus(), 80);
+}
+
 function healthSettingsSheet() {
   const h = H();
   openSheet(`
@@ -317,6 +476,7 @@ function addHealth(kind, e, msgFor, big = false) {
   if (!waterFull) ({ xp, mult } = award(H_XP[kind] + (e.bonus || 0)));
   Object.assign(e, { id: uid(), ts: Date.now(), xp, mult });
   H()[kind].push(e);
+  if (kind === 'weights') syncWeight();
   save();
   render();
   finishAction(g0, msgFor(e), { big });
@@ -334,7 +494,7 @@ const healthForms = {
   'f-hsetup'(f) {
     const r = readHealthForm(f);
     if (!r) return ($('#h-err').textContent = 'Check your height, weight and age.');
-    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), seeded: DEFAULT_MEALS.map(m => m.id), food: [], gym: [], water: [], weights: [{ date: todayISO(), kg: r.p.weightKg }] };
+    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), seeded: DEFAULT_MEALS.map(m => m.id), food: [], gym: [], water: [], weights: [{ id: uid(), date: todayISO(), kg: r.p.weightKg }] };
     save();
     view = 'health';
     animateNext = true;
@@ -349,7 +509,7 @@ const healthForms = {
     const r = readHealthForm(f);
     if (!r) return ($('#h-err').textContent = 'Check your height, weight and age.');
     const h = H();
-    if (r.p.weightKg !== h.profile.weightKg) h.weights.push({ date: todayISO(), kg: r.p.weightKg });
+    if (r.p.weightKg !== h.profile.weightKg) h.weights.push({ id: uid(), date: todayISO(), kg: r.p.weightKg });
     Object.assign(h.profile, r.p);
     Object.assign(h.settings, r.s);
     save();
@@ -366,6 +526,24 @@ const healthForms = {
     if (f.elements.fav.checked) H().meals.push(m);
     closeSheet();
     logMeal(m);
+  },
+
+  'f-weigh'(f) {
+    const kg = num(f.elements.kg.value), date = f.elements.date.value || todayISO();
+    if (!(kg > 30 && kg < 300)) return ($('#w-err').textContent = 'Enter your weight in kg, for example 84.6.');
+    if (date > todayISO()) return ($('#w-err').textContent = "That date hasn't happened yet.");
+    closeSheet();
+    // One XP weigh-in per day: a second one that day just corrects the reading
+    const same = weighIns().find(w => w.date === date);
+    if (same) {
+      same.kg = kg;
+      syncWeight(); save(); render();
+      return toast(`${fmtDayShort(date)} updated to ${kgFmt(kg)} kg.`);
+    }
+    addHealth('weights', { date, kg }, e => {
+      const s = weightSeries(), p = s.find(x => x.date === e.date);
+      return `${kgFmt(e.kg)} kg · 7-day average ${kgFmt(p.avg)} kg · <b>${xpLabel(e)}</b>`;
+    });
   },
 
   'f-gym'(f) {
@@ -397,6 +575,8 @@ registerTracker({
       s.health.seeded.push(m.id);
       if (!s.health.meals.some(x => x.id === m.id)) s.health.meals.splice(Math.min(i, s.health.meals.length), 0, { ...m });
     });
+    // Older weight entries had no id, so they couldn't be removed from the list
+    s.health.weights = (s.health.weights || []).map(w => (w.id ? w : { ...w, id: uid() }));
   },
 
   views: { health: healthView, 'health-setup': healthSetupView },
@@ -404,8 +584,8 @@ registerTracker({
   card: healthCard,
   notices: () => (state.health && !dayType(todayISO()) ? [notice('rota-ask', 'Working today? Set it in your rota', 'var(--a2)')] : []),
 
-  activity(add) { if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water].forEach(x => add(x.ts, x.xp)); },
-  xp: () => (state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water], x => x.xp) : 0),
+  activity(add) { if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns()].forEach(x => add(x.ts, x.xp)); },
+  xp: () => (state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns()], x => x.xp) : 0),
   stats: () => ({ Hs: healthStats() }),
 
   quests: {
@@ -444,10 +624,13 @@ registerTracker({
     ms('h-week-12', 'Twelve weeks on target', 'A real habit now', 2000, g => g.Hs.gymBest >= 12),
     ms('h-gym-25', '25 gym sessions', '', 600, g => g.Hs.gymCount >= 25),
     ms('h-gym-100', '100 gym sessions', '', 2500, g => g.Hs.gymCount >= 100),
+    ms('h-weigh-1', 'First weigh-in', '', 100, g => g.Hs.weighs >= 1),
+    ms('h-weigh-w4', 'Weighed in on 4 weeks', 'Enough to see a trend', 250, g => g.Hs.weighWeeks >= 4),
+    ms('h-weigh-w12', 'Weighed in on 12 weeks', 'A trend you can trust', 800, g => g.Hs.weighWeeks >= 12),
   ],
 
   xpRows: () => kv('Log a meal', `+${H_XP.food}`) + kv('Glass of water', `+${H_XP.water}`, `up to ${WATER_GOAL} a day`)
-    + kv('Gym session', `+${H_XP.gym}`, `+${SHIFT_GYM_BONUS} more on a shift day`),
+    + kv('Gym session', `+${H_XP.gym}`, `+${SHIFT_GYM_BONUS} more on a shift day`) + kv('Weigh in', `+${H_XP.weights}`, 'once a day'),
 
   forms: healthForms,
   actions: {
@@ -460,6 +643,8 @@ registerTracker({
     },
     water: () => addHealth('water', { date: todayISO() }, e => `Water ${fuelDay(todayISO()).water} of ${WATER_GOAL}${e.xp ? ` · <b>${xpLabel(e)}</b>` : ''}`),
     'gym-log': () => gymSheet(),
+    weigh: () => weighSheet(),
+    'w-range': (el, d) => { hWeightRange = Number(d.d); render(); },
     'h-settings': () => healthSettingsSheet(),
     'h-why': () => whySheet(),
     'rota-ask': () => rotaAskSheet(),
@@ -476,8 +661,10 @@ registerTracker({
     'h-del': (el, d) => {
       if (!confirm('Remove this entry?')) return;
       H()[d.kind] = H()[d.kind].filter(x => x.id !== d.id);
+      if (d.kind === 'weights') syncWeight();
       save(); render();
     },
   },
   onChange(ev) { if (ev.target.closest('#f-gym')) updateGymPreview(); },
+  onRender: drawWeightChart,
 });
