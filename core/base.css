@@ -8,7 +8,7 @@
 :root {
   --bg: #0b0b0c;
   --bg-solid: #121213;            /* opaque surface for sheets and sticky headers */
-  --surface: rgba(255, 255, 255, .055);
+  --surface: rgba(255, 255, 255, .06);
   --glass-edge: rgba(255, 255, 255, .09);
   --glass-shine: rgba(255, 255, 255, .10);
   --ink: #f3f3f1;
@@ -355,10 +355,10 @@ button.link { font-size: 13px; color: var(--muted); text-decoration: underline; 
 
 
 
-/* ---------- Glass surfaces ---------- */
-.tracker, .notice, .panel, .icon-btn, .avatar .ini, .statgrid > div, .preview, .hint.box, .btn-ghost, .chip, .purpose, .field input {
-  -webkit-backdrop-filter: var(--glass); backdrop-filter: var(--glass);
-}
+/* ---------- Glass surfaces ----------
+   Cards get their glass look from translucency and the bright edge in --shadow. Real blur
+   (backdrop-filter) is kept to floating layers only: on in-page cards it flickered while
+   screens animated in and made long screens like Money stutter on phones. */
 .btn-ghost, .chip, .purpose { box-shadow: inset 0 1px 0 var(--glass-shine), inset 0 0 0 1px var(--glass-edge); }
 .purpose:has(input:checked) { background: var(--ink); color: var(--accent-ink); box-shadow: 0 0 22px rgba(255, 255, 255, .18); }
 .btn-primary { color: var(--accent-ink); box-shadow: 0 0 0 1px rgba(255, 255, 255, .4), 0 8px 26px rgba(255, 255, 255, .12); }
@@ -385,10 +385,10 @@ body::after {
 #toasts { position: fixed; z-index: 50; }
 
 /* ---------- Motion ---------- */
-@keyframes enter { from { opacity: 0; transform: translateY(18px) scale(.985); filter: blur(4px); } }
+@keyframes enter { from { opacity: 0; transform: translateY(18px) scale(.985); } }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translateY(100%); } }
-@keyframes pop { from { transform: scale(.85); opacity: 0; filter: blur(6px); } }
+@keyframes pop { from { transform: scale(.85); opacity: 0; } }
 @keyframes grain { 0% { transform: translate(0, 0); } 20% { transform: translate(-3%, 2%); } 40% { transform: translate(2%, -3%); } 60% { transform: translate(-2%, -1%); } 80% { transform: translate(3%, 3%); } 100% { transform: translate(-1%, 2%); } }
 @keyframes drift { 0% { translate: 0 0; scale: 1; } 50% { translate: 4% -3%; scale: 1.08; } 100% { translate: -3% 4%; scale: 1.02; } }
 @keyframes sheen { 0%, 70% { transform: translateX(-120%) skewX(-18deg); } 100% { transform: translateX(260%) skewX(-18deg); } }
@@ -412,11 +412,10 @@ body::after {
 .sheet > :nth-child(4) { animation-delay: .18s; } .sheet > :nth-child(n+5) { animation-delay: .24s; }
 .center .sheet { animation: pop .55s var(--spring); }
 .backdrop { animation: fade .3s; }
-.toast { transform: translateY(24px) scale(.94); filter: blur(6px); transition: .5s var(--spring); }
-.toast.show { filter: none; }
+.toast { transform: translateY(24px) scale(.94); transition: .5s var(--spring); }
 
 /* Taps: springy press plus a soft ripple */
-.tracker, .notice, .btn, .icon-btn, .chip, .purpose, .soon, .kv, .hist, button.level-line { position: relative; overflow: hidden; transition: transform .35s var(--spring), box-shadow .3s; }
+.tracker, .notice, .btn, .icon-btn, .chip, .purpose, .soon, button.kv, label.kv, button.level-line { position: relative; overflow: hidden; transition: transform .35s var(--spring), box-shadow .3s; }
 .tracker:active, .notice:active, .icon-btn:active, .chip:active, .purpose:active, .soon:active { transform: scale(.965); }
 .btn:active { transform: scale(.94); }
 .rip { position: absolute; width: 240%; aspect-ratio: 1; border-radius: 50%; pointer-events: none; background: radial-gradient(circle, rgba(255, 255, 255, .22), transparent 60%); transform: translate(-50%, -50%) scale(0); animation: ripple .7s var(--ease) forwards; }
@@ -434,9 +433,10 @@ body::after {
 .bar > i { background-image: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, .35) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2.8s linear infinite; }
 .bar.gold > i { box-shadow: 0 0 10px rgba(212, 180, 108, .55); }
 .avatar .ring .prog { transition: stroke-dashoffset 1.4s var(--ease); animation: ringglow 3s ease-in-out infinite; }
-.grid-act i { animation: sq .45s var(--spring) both; animation-delay: calc(var(--i, 0) * 7ms); }
-.grid-act i.t { animation: sq .45s var(--spring) both, breathe 2.4s ease-in-out 1.5s infinite; }
-.quest.done .c, .ms.on .c { animation: checkpop .6s var(--spring) both; box-shadow: 0 0 14px rgba(255, 255, 255, .25); }
+.enter .grid-act i { animation: sq .45s var(--spring) both; animation-delay: calc(var(--i, 0) * 7ms); }
+.grid-act i.t { animation: breathe 2.4s ease-in-out 1.5s infinite; }
+.quest.done .c, .ms.on .c { box-shadow: 0 0 14px rgba(255, 255, 255, .25); }
+.enter .quest.done .c, .enter .ms.on .c { animation: checkpop .6s var(--spring) both; }
 .mom .flame.lit { animation: flicker 2.2s ease-in-out infinite; box-shadow: 0 0 22px rgba(235, 104, 52, .55); }
 .reward-mark { animation: spinin .9s var(--spring) both, halo 1.8s ease-out .6s infinite; }
 .reward-kicker { animation: breathe 2s ease-in-out infinite; }
@@ -446,8 +446,8 @@ body::after {
 .xp-float { position: fixed; z-index: 60; pointer-events: none; font: 600 15px var(--sans); color: var(--gold); text-shadow: 0 0 16px rgba(212, 180, 108, .7); animation: xpfloat 1.6s var(--ease) forwards; }
 
 /* Blocks further down appear as you scroll to them */
-.rv { opacity: 0; transform: translateY(26px); filter: blur(4px); transition: opacity .7s var(--ease), transform .7s var(--ease), filter .7s; }
-.rv.in { opacity: 1; transform: none; filter: none; }
+.rv { opacity: 0; transform: translateY(26px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+.rv.in { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }

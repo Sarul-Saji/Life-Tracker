@@ -16,6 +16,8 @@ function motionIn(view) {
   view.querySelectorAll('.bar > i').forEach(fillFromZero);
   view.querySelectorAll('circle[stroke-dasharray]').forEach(ringFromEmpty);
   revealOnScroll(view);
+  // Safety net: if the phone skipped frames, never leave a screen half-faded
+  setTimeout(() => view.classList.remove('enter'), 1800);
 }
 
 // Count the first number inside an element up from zero, keeping its £/₹, commas and decimals
@@ -101,4 +103,8 @@ document.addEventListener('pointerdown', e => {
 }, { passive: true });
 
 // The background glows drift a little as you scroll (parallax)
-addEventListener('scroll', () => document.body.style.setProperty('--sy', scrollY), { passive: true });
+// and any block still waiting to be revealed shows once it's on screen, even if the observer missed it
+addEventListener('scroll', () => {
+  document.body.style.setProperty('--sy', scrollY);
+  document.querySelectorAll('.rv:not(.in)').forEach(el => { if (el.getBoundingClientRect().top < innerHeight) el.classList.add('in'); });
+}, { passive: true });
