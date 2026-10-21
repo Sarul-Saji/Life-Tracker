@@ -37,8 +37,11 @@ const MONEY_FMT = {
   gbp: d => (Number(d) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
   rate: d => (Number(d) / 100).toFixed(2),
   inr: d => Number(d).toLocaleString('en-IN'),
+  int: d => Number(d).toLocaleString('en-GB'),
+  kg: d => (Number(d) / 10).toFixed(1),
 };
-const moneyValue = (kind, n) => (n === '' || n == null || isNaN(n) ? '' : MONEY_FMT[kind](kind === 'inr' ? Math.round(n) : Math.round(n * 100)));
+const MONEY_SCALE = { inr: 1, int: 1, kg: 10 };
+const moneyValue = (kind, n) => (n === '' || n == null || isNaN(n) ? '' : MONEY_FMT[kind](Math.round(n * (MONEY_SCALE[kind] ?? 100))));
 const moneyAttrs = (kind, value = '') => `data-money="${kind}" inputmode="numeric" autocomplete="off" value="${moneyValue(kind, value)}"`;
 function setMoney(input, digits) {
   digits = String(digits).replace(/\D/g, '').replace(/^0+/, '').slice(0, 10);
@@ -339,6 +342,73 @@ function closeSummary(ym) {
   return { m, gr, budgets, kept, treat, xp: gr.xp + kept * BUDGET_XP };
 }
 
+/* ---------- 4b. Health engine ----------
+   Food, gym and the shift rota. The daily calorie target is an estimate:
+   body at rest (Mifflin-St Jeor) × 1.3 for everyday movement,
+   + extra burn on shift days, + gym sessions logged that day, ± the goal. */
+const DEFAULT_MEALS = [
+  { id: 'm-burger', name: 'Burger and fries', kcal: 1400, protein: 50, fries: true },
+  { id: 'm-caesar', name: 'Chicken Caesar salad', kcal: 700, protein: 45 },
+  { id: 'm-chickenrice', name: 'Chicken and rice', kcal: 650, protein: 60 },
+];
+const GYM_TYPES = [['push', 'Push', 5], ['pull', 'Pull', 5], ['legs', 'Legs', 5.5], ['upper', 'Upper', 5], ['full', 'Full body', 5.5], ['cardio', 'Cardio', 7.5], ['other', 'Other', 5]];
+const GOALS = { lose: { name: 'Lose fat', adj: -500 }, maintain: { name: 'Maintain', adj: 0 }, build: { name: 'Build muscle', adj: 300 } };
+const WATER_GOAL = 8;
+const H_XP = { food: 10, water: 3, gym: 60 };
+const H = () => state.health;
+
+const bmr = p => 10 * p.weightKg + 6.25 * p.heightCm - 5 * p.age + (p.sex === 'f' ? -161 : 5);
+const dayType = date => (H() && H().rota[date]) || '';
+const gymName = id => (GYM_TYPES.find(g => g[0] === id) || GYM_TYPES[6])[1];
+const gymKcal = (type, mins) => Math.round((GYM_TYPES.find(g => g[0] === type) || GYM_TYPES[0])[2] * H().profile.weightKg * mins / 60);
+const proteinTarget = () => Math.round(H().profile.weightKg * 1.6);
+
+function dayTarget(date) {
+  const p = H().profile, base = Math.round(bmr(p) * 1.3);
+  const shift = dayType(date) === 'shift' ? H().settings.shiftBurn : 0;
+  const gym = sum(H().gym.filter(s => s.date === date), s => s.kcal);
+  const adj = GOALS[p.goal].adj;
+  return { base, shift, gym, adj, total: base + shift + gym + adj };
+}
+
+// One day's food picture and its fuel score (A–D)
+function fuelDay(date) {
+  const food = H().food.filter(f => f.date === date);
+  const kcal = sum(food, f => f.kcal), protein = sum(food, f => f.protein);
+  const water = H().water.filter(w => w.date === date).length;
+  const fries = food.some(f => f.fries), shift = dayType(date) === 'shift', t = dayTarget(date);
+  if (!food.length) return { kcal, protein, water, fries, shift, t, grade: null };
+  // Today isn't over, so being under target isn't a miss yet; only going over counts against you
+  const ratio = kcal / t.total, off = date === todayISO() && ratio <= 1 ? 0 : Math.abs(ratio - 1);
+  const score = (off <= 0.1 ? 40 : off <= 0.2 ? 25 : 10) + Math.min(1, protein / proteinTarget()) * 30
+    + Math.min(1, water / WATER_GOAL) * 15 + (shift && fries ? 0 : 15);
+  const grade = score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 55 ? 'C' : 'D';
+  return { kcal, protein, water, fries, shift, t, score, grade };
+}
+
+const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0 };
+function healthStats() {
+  const h = H();
+  if (!h) return ZERO_HEALTH;
+  const target = h.settings.gymTarget, thisWk = weekStart(todayISO());
+  const perWeek = {};
+  h.gym.forEach(s => { const w = weekStart(s.date); perWeek[w] = (perWeek[w] || 0) + 1; });
+  const hit = Object.keys(perWeek).filter(w => perWeek[w] >= target).sort();
+  let best = 0, run = 0, prev = null;
+  for (const w of hit) { run = prev && addDays(prev, 7) === w ? run + 1 : 1; best = Math.max(best, run); prev = w; }
+  let cur = 0, wk = perWeek[thisWk] >= target ? thisWk : addDays(thisWk, -7);
+  while (perWeek[wk] >= target) { cur++; wk = addDays(wk, -7); }
+  const fuel = [...new Set(h.food.map(f => f.date))].map(fuelDay);
+  const waterByDay = {};
+  h.water.forEach(w => { waterByDay[w.date] = (waterByDay[w.date] || 0) + 1; });
+  return {
+    meals: h.food.length, gymCount: h.gym.length, gymWeeks: hit.length, gymBest: best, gymCur: cur, thisWeek: perWeek[thisWk] || 0,
+    fryFree: fuel.filter(f => f.shift && !f.fries).length,
+    fuelA: fuel.filter(f => f.grade === 'A').length,
+    water8: Object.values(waterByDay).filter(n => n >= WATER_GOAL).length,
+  };
+}
+
 /* ---------- 5. Game engine ---------- */
 const XP = { emi: 150, perRupee: 1 / 100, perMonthSaved: 50 };
 const TX_XP = { expense: 10, income: 20, transfer: 30, nospend: 20 };
@@ -355,6 +425,7 @@ function activity() {
   const add = (ts, xp) => { const d = dayOfTs(ts); m.set(d, (m.get(d) || 0) + (xp || 0)); };
   (state.loan?.log || []).forEach(e => { if (!e.auto) add(e.ts, e.xp); });
   state.money.tx.forEach(t => add(t.ts, t.xp));
+  if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water].forEach(x => add(x.ts, x.xp));
   return m;
 }
 
@@ -392,16 +463,24 @@ const QUESTS = {
   streak7: { text: 'Show up all 7 days', goal: 7, get: w => w.activeDays },
   extra1: { text: 'Make an extra loan payment', goal: 1, get: w => w.extras },
   tx15: { text: 'Log 15 transactions', goal: 15, get: w => w.txCount },
+  gymT: { text: 'Hit your weekly gym target', goal: () => state.health?.settings.gymTarget || 3, get: w => w.gym },
+  fry3: { text: 'Fry-free on 3 shifts', goal: 3, get: w => w.fryFree },
+  protein4: { text: 'Hit your protein target on 4 days', goal: 4, get: w => w.proteinDays },
+  water4: { text: `Drink ${WATER_GOAL} glasses of water on 4 days`, goal: 4, get: w => w.waterDays },
 };
+// Health adds a fourth weekly quest (from the week Health was set up)
+const HEALTH_SLOT = ['gymT', 'fry3', 'gymT', 'protein4', 'gymT', 'water4'];
 const QUEST_SLOTS = [['log5', 'tx10', 'active6'], ['food40', 'shop30', 'nospend2'], ['streak7', 'extra1', 'tx15']];
 const QUEST_XP = 100, CHEST_XP = 150;
 
 function questsFor(wk) {
   const n = weekIndex(wk);
-  return QUEST_SLOTS.map((slot, i) => {
+  const ids = QUEST_SLOTS.map((slot, i) => {
     const id = slot[(n + i) % slot.length];
     return id === 'extra1' && !state.loan ? 'tx15' : id;
   });
+  if (state.health && wk >= weekStart(state.health.createdAt)) ids.push(HEALTH_SLOT[n % HEALTH_SLOT.length]);
+  return ids;
 }
 
 function weekData(wk, act) {
@@ -422,6 +501,16 @@ function weekData(wk, act) {
   w.moneyDays = mdays.size;
   for (const d of act.keys()) if (inWeek(d)) w.activeDays++;
   w.extras = (state.loan?.log || []).filter(e => e.type === 'extra' && inWeek(dayOfTs(e.ts))).length;
+  if (state.health) {
+    const h = state.health;
+    w.gym = h.gym.filter(s => inWeek(s.date)).length;
+    const days = [...new Set(h.food.filter(f => inWeek(f.date)).map(f => f.date))].map(fuelDay);
+    w.fryFree = days.filter(f => f.shift && !f.fries).length;
+    w.proteinDays = days.filter(f => f.protein >= proteinTarget()).length;
+    const wc = {};
+    h.water.filter(x => inWeek(x.date)).forEach(x => { wc[x.date] = (wc[x.date] || 0) + 1; });
+    w.waterDays = Object.values(wc).filter(n => n >= WATER_GOAL).length;
+  }
   return w;
 }
 
@@ -434,7 +523,8 @@ function questStatus(wk, act) {
       const valid = w.expenseLogs >= 3, ok = valid && val <= q.limit;
       return { id, text: q.text, limit: q.limit, val, valid, ok, done: over && ok, pct: Math.min(1, val / q.limit), label: `${gbp(val)} / ${gbp(q.limit)}` };
     }
-    return { id, text: q.text, val, done: val >= q.goal, pct: Math.min(1, val / q.goal), label: `${Math.min(val, q.goal)} / ${q.goal}` };
+    const goal = typeof q.goal === 'function' ? q.goal() : q.goal, v = val || 0;
+    return { id, text: q.text, val: v, done: v >= goal, pct: Math.min(1, v / goal), label: `${Math.min(v, goal)} / ${goal}` };
   });
   const done = list.filter(q => q.done).length;
   return { wk, list, done, chest: done === list.length };
@@ -489,6 +579,20 @@ const MILESTONES = [
   ms('budget-3', 'Three months on budget', '', 800, g => g.budgetMonths >= 3),
   ms('treat-1', 'First guilt-free treat', 'Rewards make discipline last', 150, g => g.treats >= 1),
   ms('remit-1l', '₹1 lakh sent home', '', 300, g => g.inrSent >= 1e5),
+  // Health
+  ms('h-meal-1', 'First meal logged', '', 100, g => g.Hs.meals >= 1),
+  ms('h-water-1', 'Eight glasses in a day', '', 100, g => g.Hs.water8 >= 1),
+  ms('h-fry-1', 'First fry-free shift', 'Same shift, better fuel', 150, g => g.Hs.fryFree >= 1),
+  ms('h-fry-10', 'Ten fry-free shifts', '', 500, g => g.Hs.fryFree >= 10),
+  ms('h-fry-50', 'Fifty fry-free shifts', 'A new default', 1500, g => g.Hs.fryFree >= 50),
+  ms('h-fuel-a', 'First A for fuel', '', 200, g => g.Hs.fuelA >= 1),
+  ms('h-fuel-a7', 'Seven A days', '', 800, g => g.Hs.fuelA >= 7),
+  ms('h-gym-1', 'First gym session', '', 150, g => g.Hs.gymCount >= 1),
+  ms('h-week-1', 'Gym target hit', 'A full week of training', 300, g => g.Hs.gymWeeks >= 1),
+  ms('h-week-4', 'Four weeks on target', '', 800, g => g.Hs.gymBest >= 4),
+  ms('h-week-12', 'Twelve weeks on target', 'A real habit now', 2000, g => g.Hs.gymBest >= 12),
+  ms('h-gym-25', '25 gym sessions', '', 600, g => g.Hs.gymCount >= 25),
+  ms('h-gym-100', '100 gym sessions', '', 2500, g => g.Hs.gymCount >= 100),
   ms('remit-10l', '₹10 lakh sent home', '', 1500, g => g.inrSent >= 1e6),
   // Loan
   ms('first-emi', 'First EMI logged', 'The habit begins', 100, g => g.L.emiCount >= 1),
@@ -517,7 +621,7 @@ for (let p = 5; p <= 100; p += 5) {
 function globalStats() {
   const act = activity(), st = streakInfo(act), tx = state.money.tx, closed = Object.values(state.money.closed);
   const g = {
-    act, L: loanStats() || ZERO_LOAN, streak: st.cur, best: st.best, today: st.today,
+    act, L: loanStats() || ZERO_LOAN, Hs: healthStats(), streak: st.cur, best: st.best, today: st.today,
     incomeCount: tx.filter(t => t.type === 'income').length,
     expenseCount: tx.filter(t => t.type === 'expense').length,
     transferCount: tx.filter(t => t.type === 'transfer').length,
@@ -537,7 +641,8 @@ function globalStats() {
   g.chests = q.chests;
   const unlocked = MILESTONES.filter(m => m.test(g));
   g.unlocked = unlocked.map(m => m.id);
-  g.xp = sum(state.loan?.log || [], e => e.xp) + sum(tx, t => t.xp) + sum(unlocked, m => m.xp) + q.xp + sum(closed, c => c.xp);
+  const healthXp = state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water], x => x.xp) : 0;
+  g.xp = sum(state.loan?.log || [], e => e.xp) + sum(tx, t => t.xp) + healthXp + sum(unlocked, m => m.xp) + q.xp + sum(closed, c => c.xp);
   return g;
 }
 
@@ -548,7 +653,7 @@ function rewardsBetween(g0, g1) {
     g1.week.list.forEach((q, i) => {
       if (q.done && !g0.week.list[i].done) out.push({ kicker: 'Quest complete', title: q.text, xp: QUEST_XP, icon: 'trophy' });
     });
-    if (g1.week.chest && !g0.week.chest) out.push({ kicker: 'Full week', title: 'All three quests done', text: 'Bonus unlocked.', xp: CHEST_XP, icon: 'trophy' });
+    if (g1.week.chest && !g0.week.chest) out.push({ kicker: 'Full week', title: `All ${g1.week.list.length} quests done`, text: 'Bonus unlocked.', xp: CHEST_XP, icon: 'trophy' });
   }
   if (multFor(g1.streak) > multFor(g0.streak))
     out.push({ kicker: 'Momentum', title: `×${multFor(g1.streak).toFixed(1)} XP`, text: `${g1.streak} days in a row. Every action now earns more.`, icon: 'flame' });
@@ -565,10 +670,11 @@ function rewardsBetween(g0, g1) {
 /* ---------- 6. Screens ---------- */
 function render() {
   const app = $('#app');
-  const screens = { home: homeView, money: moneyView, loan: loanView, 'loan-setup': loanSetupView, profile: profileView };
+  const screens = { home: homeView, money: moneyView, loan: loanView, 'loan-setup': loanSetupView, health: healthView, 'health-setup': healthSetupView, profile: profileView };
   if (!state) app.innerHTML = welcomeView();
   else {
     if (view === 'loan' && !state.loan) view = 'home';
+    if (view === 'health' && !state.health) view = 'home';
     app.innerHTML = (screens[view] || homeView)();
   }
   if (animateNext) { app.firstElementChild?.classList.add('enter'); animateNext = false; }
@@ -628,6 +734,7 @@ function homeView() {
     notices.push(notice('close-month', `${ymLabel(prevYm, { month: 'long' })} is ready to close. Claim your grade`, 'var(--gold)', `data-ym="${prevYm}"`));
   if (due.length) notices.push(notice('due', `${due.length} recurring item${due.length > 1 ? 's' : ''} due to log`));
   if (ls && ls.emiDue) notices.push(notice('emi', `Your ${fmtMonth(ls.nextEmi)} EMI is ready to log`));
+  if (state.health && !dayType(todayISO())) notices.push(notice('rota-ask', 'Working today? Set it in your rota', 'var(--a2)'));
   if (state.money.tx.length + (state.loan?.log.length || 0) > 5 && daysSince(state.lastBackup) > 14)
     notices.push(notice('backup', `Back up your data · last backup ${state.lastBackup ? fmtDay(state.lastBackup) : 'never'}`, 'var(--muted)'));
   const daysLeft = 7 - ((new Date().getDay() + 6) % 7);
@@ -652,8 +759,9 @@ function homeView() {
 
     <div class="section-title"><span>Trackers</span></div>
     ${moneyCard()}
+    ${healthCard()}
     ${loanCard(ls)}
-    <div class="soon-grid">${soon('timer', 'Flow')}${soon('bowl', 'Food')}${soon('dumbbell', 'Gym')}${soon('check', 'To-do')}</div>
+    <div class="soon-grid">${soon('timer', 'Flow')}${soon('check', 'To-do')}</div>
   </div>`;
 }
 
@@ -697,16 +805,16 @@ function questRow(q) {
 
 function questsCard(ws) {
   return `<section class="panel">${ws.list.map(questRow).join('')}
-    <div class="q-foot"><span>Complete all three</span><b>${ws.chest ? 'Bonus earned' : `+${CHEST_XP} XP bonus`}</b></div></section>`;
+    <div class="q-foot"><span>Complete all ${ws.list.length}</span><b>${ws.chest ? 'Bonus earned' : `+${CHEST_XP} XP bonus`}</b></div></section>`;
 }
 
 // Inside each tracker: just this week's quests that belong to it
-const QUEST_TRACKER = { log5: 'money', tx10: 'money', tx15: 'money', food40: 'money', shop30: 'money', nospend2: 'money', extra1: 'loan' };
+const QUEST_TRACKER = { log5: 'money', tx10: 'money', tx15: 'money', food40: 'money', shop30: 'money', nospend2: 'money', extra1: 'loan', gymT: 'health', fry3: 'health', protein4: 'health', water4: 'health' };
 function questStrip(tracker) {
   const ws = questStatus(weekStart(todayISO()), activity());
   const list = ws.list.filter(q => QUEST_TRACKER[q.id] === tracker);
   if (!list.length) return '';
-  return `<div class="section-title"><span>This week's quest${list.length > 1 ? 's' : ''}</span><span>${ws.done} of 3 done overall</span></div>
+  return `<div class="section-title"><span>This week's quest${list.length > 1 ? 's' : ''}</span><span>${ws.done} of ${ws.list.length} done overall</span></div>
     <section class="panel qstrip">${list.map(questRow).join('')}</section>`;
 }
 
@@ -1056,6 +1164,152 @@ function histItem(e) {
   </div>`;
 }
 
+/* Health screens */
+function healthCard() {
+  if (!state.health) return `<button class="tracker" data-go="health-setup">
+      <div class="tr-top">${icon('heart')}<span class="grow">Health</span>${icon('plus')}</div>
+      <div class="tr-amount setup">Set up</div>
+      <div class="tr-sub">Food, gym and your shift rota in one place, with a calorie target that knows when you're on shift.</div>
+    </button>`;
+  const today = todayISO(), f = fuelDay(today), hs = healthStats(), type = dayType(today);
+  return `<button class="tracker" data-go="health">
+      <div class="tr-top">${icon('heart')}<span class="grow">Health</span>
+        ${!type ? '<span class="due"><span class="dot"></span>Set today</span>' : ''}${icon('chevR')}</div>
+      <div class="tr-amount">${f.kcal.toLocaleString('en-GB')} <small class="of">/ ${f.t.total.toLocaleString('en-GB')} kcal</small></div>
+      <div class="tr-sub">eaten today · ${type === 'shift' ? 'shift day' : type === 'off' ? 'day off' : 'rota not set'}</div>
+      <div class="bar"><i style="width:${Math.min(100, (f.kcal / f.t.total) * 100)}%"></i></div>
+      <div class="tr-foot"><span>Gym ${hs.thisWeek} of ${H().settings.gymTarget} this week</span><span>Fuel ${f.grade || '—'}</span></div>
+    </button>`;
+}
+
+function healthView() {
+  const h = H(), today = todayISO(), f = fuelDay(today), hs = healthStats(), t = f.t, target = h.settings.gymTarget;
+  const wk = weekStart(today), days = [...Array(7)].map((_, i) => addDays(wk, i)), pt = proteinTarget(), left = t.total - f.kcal;
+  const narrow = dt => parseISO(dt).toLocaleDateString('en-GB', { weekday: 'narrow' });
+  const rota = days.map(dt => {
+    const v = dayType(dt);
+    return `<button class="rota-day ${v} ${dt === today ? 'today' : ''}" data-act="rota-cycle" data-day="${dt}" aria-label="${fmtDayShort(dt)}: ${v || 'not set'}">
+      <span>${narrow(dt)}</span><b>${v === 'shift' ? 'Shift' : v === 'off' ? 'Off' : '–'}</b></button>`;
+  }).join('');
+  const gymDays = days.map(dt => `<span class="gd ${h.gym.some(s => s.date === dt) ? 'on' : ''} ${dt === today ? 'today' : ''}">${narrow(dt)}</span>`).join('');
+  let next;
+  if (hs.thisWeek >= target) next = 'Target hit this week. Rest is part of the plan.';
+  else {
+    const free = days.filter(dt => dt >= today && dayType(dt) === 'off' && !h.gym.some(s => s.date === dt));
+    next = free.length ? `Next good gym day: <b>${free[0] === today ? 'today' : parseISO(free[0]).toLocaleDateString('en-GB', { weekday: 'long' })}</b> (day off). Shift days count too.`
+      : `${target - hs.thisWeek} more to go this week. Any day counts, shift days too.`;
+  }
+  const todayFood = h.food.filter(x => x.date === today).sort((a, b) => b.ts - a.ts);
+  const sessions = [...h.gym].sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts).slice(0, 5);
+  return `<div>
+    ${topNav('Health')}
+    ${!dayType(today) ? `<div class="ask-today"><span>Working today?</span>
+      <button class="btn btn-ghost btn-sm" data-act="rota-set" data-day="${today}" data-v="off">Day off</button>
+      <button class="btn btn-primary btn-sm" data-act="rota-set" data-day="${today}" data-v="shift">Shift</button></div>` : ''}
+    <div class="section-title"><span>This week's rota</span><span>Tap a day to change</span></div>
+    <div class="rota">${rota}</div>
+
+    <section class="hero">
+      <div class="eyebrow">Eaten today</div>
+      <div class="hero-amount">${f.kcal.toLocaleString('en-GB')} <small class="of">/ ${t.total.toLocaleString('en-GB')} kcal</small></div>
+      <div class="bar ${f.kcal > t.total * 1.1 ? 'over' : ''}"><i style="width:${Math.min(100, (f.kcal / t.total) * 100)}%"></i></div>
+      <div class="hero-meta"><span>${left >= 0 ? `${left.toLocaleString('en-GB')} kcal left` : `${(-left).toLocaleString('en-GB')} kcal over`}</span>
+        <button class="link" data-act="h-why">How is this worked out?</button></div>
+    </section>
+
+    <div class="tiles">
+      <div class="tile"><div class="k">Protein</div><div class="v">${f.protein}<small> / ${pt}g</small></div><div class="bar"><i style="width:${Math.min(100, (f.protein / pt) * 100)}%"></i></div></div>
+      <button class="tile" data-act="water"><div class="k">Water <span class="plus">+</span></div><div class="v">${f.water}<small> / ${WATER_GOAL}</small></div><div class="bar"><i style="width:${Math.min(100, (f.water / WATER_GOAL) * 100)}%"></i></div></button>
+      <button class="tile" data-act="h-why"><div class="k">Fuel score</div><div class="v grade">${f.grade || '—'}</div><div class="s">${f.grade ? 'so far today' : 'log a meal'}</div></button>
+    </div>
+
+    <div class="section-title"><span>Log a meal</span><span>One tap</span></div>
+    <div class="meals">
+      ${h.meals.map(m => `<button class="meal ${m.fries ? 'fries' : ''}" data-act="meal" data-id="${m.id}"><b>${esc(m.name)}</b><span>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g protein</span></button>`).join('')}
+      <button class="meal add" data-act="meal-other">${icon('plus')}<b>Something else</b></button>
+    </div>
+    ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
+
+    ${questStrip('health')}
+
+    <div class="section-title"><span>Gym</span><span>${hs.gymCur ? `${hs.gymCur}-week streak` : `Target: ${target} a week`}</span></div>
+    <section class="panel pad gym">
+      <div class="gym-top">
+        <div><div class="big">${hs.thisWeek}<small> of ${target}</small></div><div class="muted small">sessions this week</div></div>
+        <button class="btn btn-primary btn-sm" data-act="gym-log">Log session</button>
+      </div>
+      <div class="gym-days">${gymDays}</div>
+      <p class="treat-note">${next}</p>
+    </section>
+    ${sessions.length ? `<section class="panel" style="margin-top:12px">${sessions.map(gymItem).join('')}</section>` : ''}
+
+    <div class="section-title"><span>Your details</span></div>
+    <section class="panel">
+      <button class="kv" data-act="h-settings"><span class="k">Goal</span><span class="v">${GOALS[h.profile.goal].name} ${icon('chevR')}</span></button>
+      <button class="kv" data-act="h-settings"><span class="k">Weight</span><span class="v">${h.profile.weightKg} kg ${icon('chevR')}</span></button>
+      <button class="kv" data-act="h-settings"><span class="k">Gym target</span><span class="v">${target} a week ${icon('chevR')}</span></button>
+      <button class="kv" data-act="h-settings"><span class="k">Extra burn on a shift</span><span class="v">${h.settings.shiftBurn.toLocaleString('en-GB')} kcal ${icon('chevR')}</span></button>
+      <button class="kv" data-act="h-settings"><span class="k">Saved meals</span><span class="v">${h.meals.length} ${icon('chevR')}</span></button>
+    </section>
+  </div>`;
+}
+
+function foodItem(e) {
+  return `<div class="hist food">
+    <div class="mark">${icon(e.fries ? 'bag' : 'bowl')}</div>
+    <div class="main"><div class="t">${esc(e.name)}</div><div class="s">${e.kcal.toLocaleString('en-GB')} kcal · ${e.protein} g protein</div></div>
+    <div class="amt">${e.xp ? `<small>+${e.xp} XP</small>` : ''}</div>
+    <button class="del" data-act="h-del" data-kind="food" data-id="${e.id}" aria-label="Remove">${icon('x')}</button>
+  </div>`;
+}
+
+function gymItem(s) {
+  return `<div class="hist gymrow">
+    <div class="mark">${icon('dumbbell')}</div>
+    <div class="main"><div class="t">${gymName(s.type)} <span>· ${fmtDayShort(s.date)}</span></div><div class="s">${s.mins} min · ~${s.kcal} kcal</div></div>
+    <div class="amt">${s.xp ? `<small>+${s.xp} XP</small>` : ''}</div>
+    <button class="del" data-act="h-del" data-kind="gym" data-id="${s.id}" aria-label="Remove">${icon('x')}</button>
+  </div>`;
+}
+
+function healthFields(p, s) {
+  const chips = (name, opts, val) => `<div class="purposes">${opts.map(([v, l]) =>
+    `<label class="purpose"><input type="radio" name="${name}" value="${v}" ${String(v) === String(val) ? 'checked' : ''} hidden>${l}</label>`).join('')}</div>`;
+  return `
+    <div class="field-label">Goal</div>${chips('goal', Object.entries(GOALS).map(([k, g]) => [k, g.name]), p.goal)}
+    <div class="grid2">
+      <label class="field"><span>Height (cm)</span><input name="height" ${moneyAttrs('int', p.heightCm)}><small>6 ft = 183 cm</small></label>
+      <label class="field"><span>Weight (kg)</span><input name="weight" ${moneyAttrs('kg', p.weightKg)}></label>
+    </div>
+    <div class="grid2">
+      <label class="field"><span>Age</span><input name="age" ${moneyAttrs('int', p.age)}></label>
+      <div><div class="field-label">Body</div>${chips('sex', [['m', 'Male'], ['f', 'Female']], p.sex)}</div>
+    </div>
+    <div class="field-label">Gym sessions a week</div>${chips('gym', [[2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']], s.gymTarget)}
+    <label class="field"><span>Extra calories burned on a shift day</span><input name="shift" ${moneyAttrs('int', s.shiftBurn)}>
+      <small>Long hospitality shifts on your feet often burn 600–1,000 extra. 800 is a sensible start.</small></label>`;
+}
+
+function healthSetupView() {
+  return `<div>
+    ${topNav('New tracker')}
+    <h1 class="page-title">Health</h1>
+    <p class="page-lead">Food, gym and your shift rota in one place. These details set your daily calorie target, and they stay on this device.</p>
+    <form id="f-hsetup">
+      ${healthFields({ heightCm: 183, weightKg: 85, age: 27, sex: 'm', goal: 'maintain' }, { gymTarget: 3, shiftBurn: 800 })}
+      <div id="h-err" class="err"></div>
+      <button class="btn btn-primary btn-block">Start tracking</button>
+    </form>
+  </div>`;
+}
+
+function readHealthForm(f) {
+  const p = { heightCm: num(f.elements.height.value), weightKg: num(f.elements.weight.value), age: num(f.elements.age.value), sex: f.elements.sex.value || 'm', goal: f.elements.goal.value || 'maintain' };
+  const s = { gymTarget: Number(f.elements.gym.value) || 3, shiftBurn: num(f.elements.shift.value) || 0 };
+  if (!(p.heightCm > 100 && p.heightCm < 250 && p.weightKg > 30 && p.weightKg < 300 && p.age > 12 && p.age < 100)) return null;
+  return { p, s };
+}
+
 function loanSetupView() {
   const f = (name, label, attrs, help = '') =>
     `<label class="field"><span>${label}</span><input name="${name}" ${attrs} required>${help ? `<small>${help}</small>` : ''}</label>`;
@@ -1321,6 +1575,9 @@ function xpSheet() {
       ${kv('No-spend day', '+20')}
       ${kv('EMI', '+150', 'logged automatically each month')}
       ${kv('Extra loan payment', '+1 per ₹100', '+50 for every month it cuts')}
+      ${kv('Log a meal', `+${H_XP.food}`)}
+      ${kv('Glass of water', `+${H_XP.water}`, `up to ${WATER_GOAL} a day`)}
+      ${kv('Gym session', `+${H_XP.gym}`)}
       ${kv('First log of the day', '+20 bonus')}
     </div>
     <div class="section-title"><span>Multiply</span></div>
@@ -1338,6 +1595,98 @@ function xpSheet() {
     <div class="panel">${TITLES.map(([l, t]) => kv(t, `Level ${l}`, '', lv.lvl >= l ? 'pos' : '')).join('')}</div>
     <div style="height:18px"></div>
     <button class="btn btn-primary btn-block" data-close>Got it</button>`);
+}
+
+function foodSheet() {
+  openSheet(`
+    <h2>Something else</h2>
+    <p class="lead">A rough estimate is fine. Logging consistently matters more than being precise.</p>
+    <form id="f-food">
+      <label class="field"><span>What did you eat?</span><input name="name" maxlength="40" placeholder="Chicken wrap"></label>
+      <div class="grid2">
+        <label class="field"><span>Calories</span><input name="kcal" ${moneyAttrs('int')} placeholder="0"></label>
+        <label class="field"><span>Protein (g)</span><input name="protein" ${moneyAttrs('int')} placeholder="0"></label>
+      </div>
+      <label class="check-row"><input type="checkbox" name="fries"> Came with fries</label>
+      <label class="check-row"><input type="checkbox" name="fav" checked> Save to my meals for one-tap logging</label>
+      <div id="f-err" class="err"></div>
+      ${sheetButtons('Log meal')}
+    </form>`);
+  setTimeout(() => $('#f-food [name=name]')?.focus(), 80);
+}
+
+function gymSheet() {
+  const chips = (name, opts, val) => `<div class="purposes">${opts.map(([v, l]) =>
+    `<label class="purpose"><input type="radio" name="${name}" value="${v}" ${v === val ? 'checked' : ''} hidden>${l}</label>`).join('')}</div>`;
+  openSheet(`
+    <h2>Log a session</h2>
+    <p class="lead">Any day counts, shift or off.</p>
+    <form id="f-gym">
+      <div class="field-label">Type</div>${chips('type', GYM_TYPES.map(g => [g[0], g[1]]), 'push')}
+      <div class="field-label">Duration</div>${chips('mins', [30, 45, 60, 75, 90].map(m => [String(m), `${m} min`]), '60')}
+      <label class="field"><span>Date</span><input name="date" type="date" value="${todayISO()}"></label>
+      <div class="preview" id="g-preview"></div>
+      ${sheetButtons('Log session')}
+    </form>`);
+  updateGymPreview();
+}
+
+function updateGymPreview() {
+  const f = $('#f-gym');
+  if (!f) return;
+  const k = gymKcal(f.elements.type.value, Number(f.elements.mins.value));
+  $('#g-preview').innerHTML = kv('Estimated burn', `~${k} kcal`, "added to that day's calorie target") + kv('Reward', `+${award(H_XP.gym).xp} XP`);
+}
+
+function healthSettingsSheet() {
+  const h = H();
+  openSheet(`
+    <h2>Your details</h2>
+    <p class="lead">These set your daily calorie and protein targets.</p>
+    <form id="f-hsettings">
+      ${healthFields(h.profile, h.settings)}
+      <div class="field-label">Saved meals</div>
+      <div class="panel" style="margin-bottom:18px">${h.meals.map(m => `<div class="kv"><span class="k">${esc(m.name)}<br><small>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g</small></span>
+        <button type="button" class="del" data-act="meal-remove" data-id="${m.id}" aria-label="Remove ${esc(m.name)}">${icon('x')}</button></div>`).join('') || '<p class="empty">No saved meals.</p>'}</div>
+      <div id="h-err" class="err"></div>
+      ${sheetButtons('Save')}
+    </form>`);
+}
+
+function whySheet() {
+  const p = H().profile, today = todayISO(), t = dayTarget(today), b = Math.round(bmr(p)), f = fuelDay(today);
+  const sign = n => (n > 0 ? '+' : n < 0 ? '−' : '') + Math.abs(n).toLocaleString('en-GB');
+  openSheet(`
+    <h2>Your daily target</h2>
+    <p class="lead">An estimate, not a prescription. It changes with your rota and gym sessions every day.</p>
+    <div class="panel">
+      ${kv('Body at rest', `${b.toLocaleString('en-GB')} kcal`, 'from height, weight and age')}
+      ${kv('Everyday movement', sign(t.base - b), '×1.3 for normal daily life')}
+      ${kv('Shift', t.shift ? sign(t.shift) : '—', t.shift ? 'walking on a long shift' : dayType(today) === 'off' ? 'day off' : 'rota not set')}
+      ${kv('Gym today', t.gym ? sign(t.gym) : '—')}
+      ${kv(`Goal: ${GOALS[p.goal].name}`, t.adj ? sign(t.adj) : '—')}
+      ${kv("Today's target", `${t.total.toLocaleString('en-GB')} kcal`, '', 'pos')}
+    </div>
+    <div class="section-title"><span>Fuel score${f.grade ? ` · ${f.grade} so far` : ''}</span></div>
+    <div class="panel">
+      ${kv('Calories near target', '40 pts', 'within 10% of target')}
+      ${kv(`Protein (${proteinTarget()} g)`, '30 pts', '1.6 g per kg of body weight')}
+      ${kv(`Water (${WATER_GOAL} glasses)`, '15 pts')}
+      ${kv('Fry-free on a shift', '15 pts', 'days off count automatically')}
+    </div>
+    <p class="hint">A 85+, B 70+, C 55+, D below.</p>
+    <button class="btn btn-primary btn-block" data-close>Got it</button>`);
+}
+
+function rotaAskSheet() {
+  const today = todayISO();
+  openSheet(`
+    <h2>Working today?</h2>
+    <p class="lead">Shift days add extra calories to your target and count towards fry-free shifts.</p>
+    <div class="sheet-actions">
+      <button class="btn btn-ghost" data-act="rota-set" data-day="${today}" data-v="off">Day off</button>
+      <button class="btn btn-primary" data-act="rota-set" data-day="${today}" data-v="shift">Working a shift</button>
+    </div>`);
 }
 
 function showRewards(list) {
@@ -1387,6 +1736,27 @@ function addTx(t, msgFor) {
   save();
   render();
   finishAction(g0, msgFor(t), { big: !!t.loanId || (t.type === 'income' && t.amount >= 500) });
+}
+
+// Health logs (food, water, gym) share one path: XP with momentum, save, celebrate
+function addHealth(kind, e, msgFor, big = false) {
+  const g0 = globalStats();
+  let xp = 0, mult = 1;
+  const waterFull = kind === 'water' && H().water.filter(w => w.date === e.date).length >= WATER_GOAL;
+  if (!waterFull) ({ xp, mult } = award(H_XP[kind]));
+  Object.assign(e, { id: uid(), ts: Date.now(), xp, mult });
+  H()[kind].push(e);
+  save();
+  render();
+  finishAction(g0, msgFor(e), { big });
+}
+
+function logMeal(m) {
+  addHealth('food', { date: todayISO(), mealId: m.id, name: m.name, kcal: m.kcal, protein: m.protein, fries: !!m.fries }, e => {
+    const f = fuelDay(todayISO()), left = f.t.total - f.kcal;
+    const fryNote = f.shift && !f.fries ? ' · fry-free shift so far' : '';
+    return `${esc(e.name)} · ${e.kcal.toLocaleString('en-GB')} kcal · ${left >= 0 ? `${left.toLocaleString('en-GB')} left` : `${(-left).toLocaleString('en-GB')} over`} today${fryNote} · <b>${xpLabel(e)}</b>`;
+  });
 }
 
 function logPayment(type, amount, date) {
@@ -1478,6 +1848,52 @@ const forms = {
       if (b) msg += b.kept ? ` · ${gbp(b.left)} left in ${catOf(b.id).name}` : ` · <b>${catOf(b.id).name} over budget by ${gbp(-b.left)}</b>`;
       return msg;
     });
+  },
+
+  'f-hsetup'(f) {
+    const r = readHealthForm(f);
+    if (!r) return ($('#h-err').textContent = 'Check your height, weight and age.');
+    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), food: [], gym: [], water: [], weights: [{ date: todayISO(), kg: r.p.weightKg }] };
+    save();
+    view = 'health';
+    animateNext = true;
+    history.replaceState({ v: 'health' }, '');
+    render();
+    scrollTo(0, 0);
+    sfx.chime();
+    toast("Health is ready. Start by setting today's shift and logging your next meal.");
+  },
+
+  'f-hsettings'(f) {
+    const r = readHealthForm(f);
+    if (!r) return ($('#h-err').textContent = 'Check your height, weight and age.');
+    const h = H();
+    if (r.p.weightKg !== h.profile.weightKg) h.weights.push({ date: todayISO(), kg: r.p.weightKg });
+    Object.assign(h.profile, r.p);
+    Object.assign(h.settings, r.s);
+    save();
+    closeSheet();
+    render();
+    toast('Details saved. Your targets are updated.');
+  },
+
+  'f-food'(f) {
+    const name = f.elements.name.value.trim(), kcal = num(f.elements.kcal.value), protein = num(f.elements.protein.value) || 0;
+    if (!name) return ($('#f-err').textContent = 'Name the meal.');
+    if (!kcal) return ($('#f-err').textContent = 'Add a calorie estimate.');
+    const m = { id: uid(), name, kcal, protein, fries: f.elements.fries.checked };
+    if (f.elements.fav.checked) H().meals.push(m);
+    closeSheet();
+    logMeal(m);
+  },
+
+  'f-gym'(f) {
+    const type = f.elements.type.value, mins = Number(f.elements.mins.value), date = f.elements.date.value || todayISO();
+    closeSheet();
+    addHealth('gym', { type, mins, date, kcal: gymKcal(type, mins) }, e => {
+      const n = healthStats().thisWeek, target = H().settings.gymTarget;
+      return `${gymName(type)} · ${mins} min · ~${e.kcal} kcal · <b>${n} of ${target}</b> this week${n === target ? ' · <b>target hit</b>' : ''} · <b>${xpLabel(e)}</b>`;
+    }, true);
   },
 
   'f-budget'(f) {
@@ -1599,6 +2015,33 @@ function act(a, el) {
       save(); closeSheet(); render();
       return finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>${c.treat ? ` · <b>${gbp(c.treat)}</b> added to your treat fund` : ''}`, { big: true });
     }
+    case 'meal': { const m = H().meals.find(x => x.id === d.id); return m && logMeal(m); }
+    case 'meal-other': return foodSheet();
+    case 'meal-remove':
+      H().meals = H().meals.filter(m => m.id !== d.id);
+      save();
+      return healthSettingsSheet();
+    case 'water':
+      return addHealth('water', { date: todayISO() }, e => `Water ${fuelDay(todayISO()).water} of ${WATER_GOAL}${e.xp ? ` · <b>${xpLabel(e)}</b>` : ''}`);
+    case 'gym-log': return gymSheet();
+    case 'h-settings': return healthSettingsSheet();
+    case 'h-why': return whySheet();
+    case 'rota-ask': return rotaAskSheet();
+    case 'rota-set':
+      H().rota[d.day] = d.v;
+      save(); closeSheet(); render();
+      return toast(d.v === 'shift' ? `Shift day: +${H().settings.shiftBurn} kcal on today's target.` : 'Day off. A good day for the gym.');
+    case 'rota-cycle': {
+      const order = ['', 'shift', 'off'], cur = dayType(d.day), next = order[(order.indexOf(cur) + 1) % 3];
+      if (next) H().rota[d.day] = next; else delete H().rota[d.day];
+      save(); render();
+      return;
+    }
+    case 'h-del':
+      if (!confirm('Remove this entry?')) return;
+      H()[d.kind] = H()[d.kind].filter(x => x.id !== d.id);
+      save(); render();
+      return;
     case 'mix': return focusMix(d.g);
     case 'tx-all': showAllTx = !showAllTx; render(); return;
     case 'xp-help': return xpSheet();
@@ -1679,7 +2122,7 @@ function weeklyRecap() {
   const s = questStatus(addDays(cur, -7), activity());
   if (!s.list.some(q => q.val > 0)) return;
   showRewards([{
-    kicker: 'Last week', title: `${s.done} of 3 quests`, icon: 'trophy',
+    kicker: 'Last week', title: `${s.done} of ${s.list.length} quests`, icon: 'trophy',
     text: s.chest ? 'A full week. Bonus earned. New quests are ready.' : 'New quests are ready for this week.',
     xp: s.done * QUEST_XP + (s.chest ? CHEST_XP : 0),
   }]);
@@ -1825,6 +2268,7 @@ document.addEventListener('input', ev => {
 });
 document.addEventListener('change', ev => {
   if (ev.target.closest('#f-transfer')) updateTransferPreview();
+  if (ev.target.closest('#f-gym')) updateGymPreview();
   if (ev.target.id === 'p-range') save();
   if (ev.target.id === 'f-import' && ev.target.files[0]) importBackup(ev.target.files[0]);
 });
