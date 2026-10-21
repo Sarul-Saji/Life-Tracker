@@ -7,7 +7,7 @@
   --care-ov: #e2cd96;
   --care-lut: #e0dbd0;
 }
-@media (prefers-color-scheme: dark) {
+@media all { /* the app is always dark now */
   :root { --care-rose: #e08a9c; --care-pms: #a8566a; --care-foll: #2b4239; --care-ov: #6e5c2e; --care-lut: #34322e; }
 }
 

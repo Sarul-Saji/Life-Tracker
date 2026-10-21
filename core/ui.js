@@ -13,8 +13,10 @@ function render() {
     if (owner && !owner.needsData[view]()) view = 'home';
     app.innerHTML = (screens[view] || homeView)();
   }
+  const anim = animateNext;
   if (animateNext) { app.firstElementChild?.classList.add('enter'); animateNext = false; }
   if (state) TRACKERS.forEach(t => t.onRender?.());
+  if (anim) motionIn(app.firstElementChild);
 }
 
 function go(next) {
@@ -83,6 +85,7 @@ function finishAction(g0, msg, { big = false, el = null } = {}) {
   if (big) { sfx.chime(); haptic([15, 50, 30]); confetti(el, 60); }
   else { sfx.soft(); haptic(15); }
   toast(msg, big ? 5500 : 3500);
+  xpFloat(msg, el);
   const rewards = rewardsBetween(g0, g1);
   if (rewards.length) setTimeout(() => showRewards(rewards), big ? 1300 : 800);
 }

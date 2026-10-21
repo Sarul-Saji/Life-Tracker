@@ -74,7 +74,7 @@ button.cat-row { width: 100%; text-align: left; }
 /* Spending mix chart. Series colours are validated for colour-blind
    separation in both modes; text never takes the series colour. */
 :root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; }
-@media (prefers-color-scheme: dark) {
+@media all { /* the app is always dark now */
   :root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; }
 }
 .mix-bar { display: flex; gap: 2px; height: 14px; border-radius: 4px; overflow: hidden; }
