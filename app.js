@@ -30,6 +30,22 @@ const gbp = n => {
   return (n < -0.004 ? '−' : '') + '£' + s;
 };
 const num = s => Number(String(s).replace(/[^0-9.]/g, ''));
+
+// Money inputs work like a banking app: type digits only, and the decimal point / commas fill in for you.
+// gbp: 1250 → 12.50 · inr: 50000 → 50,000 · rate: 999 → 9.99
+const MONEY_FMT = {
+  gbp: d => (Number(d) / 100).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  rate: d => (Number(d) / 100).toFixed(2),
+  inr: d => Number(d).toLocaleString('en-IN'),
+};
+const moneyValue = (kind, n) => (n === '' || n == null || isNaN(n) ? '' : MONEY_FMT[kind](kind === 'inr' ? Math.round(n) : Math.round(n * 100)));
+const moneyAttrs = (kind, value = '') => `data-money="${kind}" inputmode="numeric" autocomplete="off" value="${moneyValue(kind, value)}"`;
+function setMoney(input, digits) {
+  digits = String(digits).replace(/\D/g, '').replace(/^0+/, '').slice(0, 10);
+  input.value = digits ? MONEY_FMT[input.dataset.money](digits) : '';
+  const end = input.value.length;
+  try { input.setSelectionRange(end, end); } catch { /* some input types don't support it */ }
+}
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const pad = n => String(n).padStart(2, '0');
@@ -827,7 +843,7 @@ function habitsCard() {
   return `<div class="section-title"><span>Habits</span><span>Last 30 days</span></div>
     <section class="panel pad habits">
       ${h.per.map(p => { const c = catOf(p.id); return `<div class="habit"><span class="mark">${icon(c.icon)}</span><span class="name">${c.name}</span><b>${gbp(p.last30)}</b></div>`; }).join('')}
-      <p class="treat-note">On pace for <b>${gbp(Math.round(h.yearly))} a year</b>.${loanLine}</p>
+      <p class="treat-note">If you keep spending at this rate, that's about <b>${gbp(Math.round(h.yearly))} a year</b>.${loanLine}</p>
     </section>`;
 }
 
@@ -1027,11 +1043,11 @@ function loanSetupView() {
     <p class="page-lead">Copy these from your loan statement. They stay on this device.</p>
     <form id="f-loan-setup">
       ${f('name', 'Name', 'value="Student loan" maxlength="30"')}
-      ${f('original', 'Original loan amount (₹)', 'inputmode="decimal"', 'The full amount you borrowed.')}
-      ${f('balance', 'Outstanding balance now (₹)', 'inputmode="decimal"', 'The closing principal after your latest EMI.')}
+      ${f('original', 'Original loan amount (₹)', moneyAttrs('inr'), 'The full amount you borrowed.')}
+      ${f('balance', 'Outstanding balance now (₹)', moneyAttrs('inr'), 'The closing principal after your latest EMI.')}
       <div class="grid2">
-        ${f('rate', 'Interest rate (%)', 'inputmode="decimal"')}
-        ${f('emi', 'Monthly EMI (₹)', 'inputmode="decimal"')}
+        ${f('rate', 'Interest rate (%)', moneyAttrs('rate') + ' placeholder="0.00"')}
+        ${f('emi', 'Monthly EMI (₹)', moneyAttrs('inr'))}
       </div>
       ${f('date', 'Date of your latest EMI', `type="date" value="${todayISO()}"`)}
       <div id="setup-err" class="err"></div>
@@ -1109,7 +1125,7 @@ function txSheet(type, { treat = false } = {}) {
     <h2>${treat ? 'Treat yourself' : isInc ? 'Money in' : 'Money out'}</h2>
     <p class="lead">${treat ? `You've earned ${gbp(fund)}. Spend it on something you enjoy, guilt-free.` : isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
     <form id="f-tx" data-type="${type}">
-      <label class="field"><span>Amount (£)</span><input name="amount" inputmode="decimal" autocomplete="off" placeholder="${isInc ? '2,400' : '12.50'}"></label>
+      <label class="field"><span>Amount (£)</span><input name="amount" ${moneyAttrs('gbp')} placeholder="0.00"></label>
       <div class="cats">${cats.map((c, i) => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${isInc && i === 0 ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
       <div class="grid2">
         <label class="field"><span>Note</span><input name="note" maxlength="40" placeholder="${isInc ? 'October salary' : 'Tesco'}"></label>
@@ -1131,8 +1147,8 @@ function transferSheet(prefill = '') {
     <p class="lead">What left in pounds, and what arrived in rupees. Your exchange rate is tracked over time.</p>
     <form id="f-transfer">
       <div class="grid2">
-        <label class="field"><span>Sent (£)</span><input name="gbp" inputmode="decimal" autocomplete="off" value="${prefill}"></label>
-        <label class="field"><span>Received (₹)</span><input name="inr" inputmode="decimal" autocomplete="off"></label>
+        <label class="field"><span>Sent (£)</span><input name="gbp" ${moneyAttrs('gbp', prefill)} placeholder="0.00"></label>
+        <label class="field"><span>Received (₹)</span><input name="inr" ${moneyAttrs('inr')} placeholder="0"></label>
       </div>
       <div class="rate-line" id="rate-line"></div>
       <div class="purposes">${purposes}</div>
@@ -1170,7 +1186,7 @@ function paySheet(type) {
       : 'For money paid from your Indian account. Every rupee goes straight to the principal.'}</p>
     ${isEmi ? '' : `<p class="hint box">Sending it from the UK? Log it in <b>Money → To India</b> as <b>Loan extra</b> instead. It lands here automatically, so you never log it twice.</p>`}
     <form id="f-pay" data-type="${type}">
-      <label class="field"><span>Amount (₹)</span><input id="m-amt" inputmode="decimal" autocomplete="off" value="${isEmi ? state.loan.emi : ''}" placeholder="50,000"></label>
+      <label class="field"><span>Amount (₹)</span><input id="m-amt" ${moneyAttrs('inr', isEmi ? state.loan.emi : '')} placeholder="50,000"></label>
       ${isEmi ? '' : `<div class="chips">${chips}</div>`}
       <label class="field"><span>Date</span><input id="m-date" type="date" value="${isEmi ? toISO(s.nextEmi) : todayISO()}"></label>
       <div class="preview" id="m-preview"></div>
@@ -1202,8 +1218,8 @@ function termsSheet() {
     <p class="lead">Your rate is floating. Update these whenever the bank changes them.</p>
     <form id="f-terms">
       <div class="grid2">
-        <label class="field"><span>Interest rate (%)</span><input name="rate" inputmode="decimal" value="${state.loan.rate}"></label>
-        <label class="field"><span>Monthly EMI (₹)</span><input name="emi" inputmode="decimal" value="${state.loan.emi}"></label>
+        <label class="field"><span>Interest rate (%)</span><input name="rate" ${moneyAttrs('rate', state.loan.rate)}></label>
+        <label class="field"><span>Monthly EMI (₹)</span><input name="emi" ${moneyAttrs('inr', state.loan.emi)}></label>
       </div>
       ${sheetButtons('Save')}
     </form>`);
@@ -1214,7 +1230,7 @@ function syncSheet() {
     <h2>Sync balance</h2>
     <p class="lead">The app estimates your balance. Now and then, enter the real outstanding principal from your bank app so everything stays accurate.</p>
     <form id="f-sync">
-      <label class="field"><span>Outstanding balance (₹)</span><input name="bal" inputmode="decimal" placeholder="${Math.round(loanBalance()).toLocaleString('en-IN')}"></label>
+      <label class="field"><span>Outstanding balance (₹)</span><input name="bal" ${moneyAttrs('inr')} placeholder="${Math.round(loanBalance()).toLocaleString('en-IN')}"></label>
       ${sheetButtons('Sync')}
     </form>`);
 }
@@ -1263,7 +1279,7 @@ function budgetSheet(catId = '') {
     <p class="lead">A monthly limit for one category. Keep it, and you earn +${BUDGET_XP} XP when you close the month.</p>
     <form id="f-budget" data-old="${catId}">
       <div class="cats">${choices.map(c => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${c.id === catId ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
-      <label class="field"><span>Monthly limit (£)</span><input name="limit" inputmode="decimal" autocomplete="off" value="${catId ? state.money.budgets[catId] : ''}" placeholder="120"></label>
+      <label class="field"><span>Monthly limit (£)</span><input name="limit" ${moneyAttrs('gbp', catId ? state.money.budgets[catId] : '')} placeholder="0.00"></label>
       <div id="b-err" class="err"></div>
       ${sheetButtons('Save budget')}
       ${catId ? `<button type="button" class="btn btn-text btn-danger btn-block" data-act="budget-del" data-id="${catId}">Remove this budget</button>` : ''}
@@ -1745,6 +1761,24 @@ document.addEventListener('click', ev => {
   if (el.dataset.soon) { sfx.tap(); return toast(`<b>${el.dataset.soon}</b> arrives in a coming update.`); }
   act(el.dataset.act, el);
 });
+// Money inputs: digits go in from the right; backspace removes the last digit
+document.addEventListener('beforeinput', ev => {
+  const el = ev.target;
+  if (!el.dataset?.money) return;
+  const digits = el.value.replace(/\D/g, '');
+  const all = el.value && el.selectionStart === 0 && el.selectionEnd === el.value.length;
+  if (ev.inputType === 'insertText' && ev.data) setMoney(el, (all ? '' : digits) + ev.data);
+  else if (ev.inputType === 'deleteContentBackward') setMoney(el, all ? '' : digits.slice(0, -1));
+  else return;   // paste and anything else: let it happen, then clean it up on 'input'
+  ev.preventDefault();
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+// Keep the cursor at the end, where new digits arrive
+document.addEventListener('focusin', ev => {
+  const el = ev.target;
+  if (el.dataset?.money) setTimeout(() => { try { el.setSelectionRange(el.value.length, el.value.length); } catch { /* ignore */ } }, 0);
+});
+
 // Spending mix: hovering a segment (mouse) previews its details
 document.addEventListener('pointerover', ev => {
   const s = ev.target.closest?.('.seg');
@@ -1761,6 +1795,7 @@ document.addEventListener('submit', ev => {
   forms[ev.target.id]?.(ev.target);
 });
 document.addEventListener('input', ev => {
+  if (ev.target.dataset?.money) setMoney(ev.target, ev.target.value);
   if (ev.target.id === 'm-amt') updatePreview();
   if (ev.target.closest('#f-transfer')) updateTransferPreview();
   if (ev.target.id === 'p-range') { state.settings.plan = Number(ev.target.value); updatePlan(); }
