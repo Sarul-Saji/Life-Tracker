@@ -1257,14 +1257,9 @@ function healthView() {
     </section>
     ${sessions.length ? `<section class="panel" style="margin-top:12px">${sessions.map(gymItem).join('')}</section>` : ''}
 
-    <div class="section-title"><span>Your details</span></div>
-    <section class="panel">
-      <button class="kv" data-act="h-settings"><span class="k">Goal</span><span class="v">${GOALS[h.profile.goal].name} ${icon('chevR')}</span></button>
-      <button class="kv" data-act="h-settings"><span class="k">Weight</span><span class="v">${h.profile.weightKg} kg ${icon('chevR')}</span></button>
-      <button class="kv" data-act="h-settings"><span class="k">Gym target</span><span class="v">${target} a week ${icon('chevR')}</span></button>
-      <button class="kv" data-act="h-settings"><span class="k">Extra burn on a shift</span><span class="v">${h.settings.shiftBurn.toLocaleString('en-GB')} kcal ${icon('chevR')}</span></button>
-      <button class="kv" data-act="h-settings"><span class="k">Saved meals</span><span class="v">${h.meals.length} ${icon('chevR')}</span></button>
-    </section>
+    <button class="details-btn" data-act="h-settings">
+      <span>Your details</span><small>${GOALS[h.profile.goal].name} · ${h.profile.weightKg} kg · gym ${target}/week</small>${icon('chevR')}
+    </button>
   </div>`;
 }
 
