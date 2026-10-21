@@ -1,6 +1,6 @@
 'use strict';
 /* COMPOUND · trackers/money.js
-   Money tracker (£): income, spending, budgets, India transfers, month close, treat fund.
+   Money tracker (£): income, spending, budgets, India transfers, month close.
    Owned by the "Compound: Money and Loan" session. */
 
 let moneyMonth = ymNow();
@@ -79,93 +79,13 @@ function budgetStatus(ym) {
   });
 }
 
-// Treat fund: 5% of what you put to work each month becomes guilt-free spending money
-const TREAT_RATE = 0.05;
-const treatFor = m => Math.round(TREAT_RATE * (m.transfer.extra + m.saved));
-const treatBalance = () => sum(Object.values(state.money.closed), c => c.treat) - sum(state.money.tx, t => (t.treat ? t.amount : 0));
 
 const BUDGET_XP = 100;
 // Everything that happens when a month is closed
 function closeSummary(ym) {
   const m = monthStats(ym), gr = gradeFor(m), budgets = budgetStatus(ym);
-  const kept = budgets.filter(b => b.kept).length, treat = treatFor(m);
-  return { m, gr, budgets, kept, treat, xp: gr.xp + kept * BUDGET_XP };
-}
-
-/* Safe to spend today
-   Starts from the Barclays balance you last typed in, adds what you've logged since, sets aside what
-   still has to go out before payday (unlogged bills, the rest of the loan target, EMI money home),
-   and splits what's left across the days until payday. */
-const daysBetween = (a, b) => Math.round((parseISO(b) - parseISO(a)) / 864e5);
-const salaryDay = () => state.money.recurring.find(r => r.type === 'income' && r.cat === 'salary')?.day || 0;
-const paydayDay = () => state.money.payday || salaryDay();   // 0 = not known: plan to the end of the month
-
-function nextPayday(today = todayISO()) {
-  const day = paydayDay(), ym = today.slice(0, 7);
-  if (!day) return ymAdd(ym, 1) + '-01';
-  const on = m => `${m}-${pad(Math.min(day, parseISO(ymLastDay(m)).getDate()))}`;
-  return on(ym) > today ? on(ym) : on(ymAdd(ym, 1));
-}
-
-function safeToSpend() {
-  const M = state.money, b = M.balance;
-  if (!b) return null;
-  const today = todayISO(), ym = today.slice(0, 7), payday = nextPayday(today), days = Math.max(1, daysBetween(today, payday));
-  // Logged after you typed the balance in, and not backdated to before it (the bank already had those)
-  const since = M.tx.filter(t => t.ts > b.ts && t.date >= b.date && t.date <= today);
-  const inSince = sum(since.filter(t => t.type === 'income'), t => t.amount);
-  const outSince = sum(since.filter(t => t.type === 'expense' || t.type === 'transfer'), t => t.amount);
-  const spentToday = sum(since.filter(t => t.type === 'expense' && t.date === today), t => t.amount);
-  const now = b.amount + inSince - outSince;
-
-  const set = [];
-  const months = payday.slice(0, 7) === ym ? [ym] : [ym, payday.slice(0, 7)];
-  for (const r of M.recurring.filter(x => x.type === 'expense')) for (const m of months) {
-    const due = `${m}-${pad(Math.min(r.day, 28))}`;
-    if (due >= b.date && due < payday && !M.tx.some(t => t.recurringId === r.id && t.date.slice(0, 7) === m))
-      set.push({ label: r.note ? esc(r.note) : catOf(r.cat).name, sub: due <= today ? 'due, not logged yet' : `due ${fmtDayShort(due)}`, amount: r.amount });
-  }
-  const rate = latestRate();
-  if (state.loan?.target > 0 && rate && loanBalance() > 0) {
-    const left = state.loan.target - extrasIn(ym);
-    if (left > 0) set.push({ label: 'Loan target', sub: `${inr(left)} still to send this month`, amount: left / rate });
-  }
-  const emiTx = M.tx.filter(t => t.type === 'transfer' && t.purpose === 'emi');
-  const lastEmi = sum(emiTx.filter(t => t.date.slice(0, 7) === ymAdd(ym, -1)), t => t.amount);
-  if (lastEmi > 0 && !emiTx.some(t => t.date.slice(0, 7) === ym)) set.push({ label: 'EMI money home', sub: 'same as last month', amount: lastEmi });
-
-  const reserved = sum(set, x => x.amount);
-  const free = now + spentToday - reserved;   // today's spending added back, so today gets a fair share
-  const perDay = free / days;
-  return { b, now, inSince, outSince, spentToday, set, reserved, free, days, payday, perDay, left: perDay - spentToday, age: daysBetween(b.date, today) };
-}
-
-function safeCard() {
-  const s = safeToSpend(), until = paydayDay() ? 'payday' : 'the end of the month';
-  const head = `<div class="section-title"><span>Safe to spend today</span><span>${s ? `${s.days} day${s.days === 1 ? '' : 's'} to ${paydayDay() ? 'payday' : 'month end'}` : ''}</span></div>`;
-  if (!s) return `${head}<section class="panel pad safe">
-      <p class="safe-note">Type in your Barclays balance once and this shows how much you can spend each day until payday, after bills and your loan target.</p>
-      <button class="btn btn-ghost btn-block" data-act="balance">Add your Barclays balance</button>
-    </section>`;
-  let big, sub, cls = '';
-  if (s.free < 0) {
-    big = gbp(-s.free); cls = 'neg';
-    sub = `short before ${until}, after bills and your loan target`;
-  } else if (s.left < 0) {
-    big = gbp(-s.left); cls = 'neg';
-    sub = `over today's ${gbp(s.perDay)} · the days ahead get a little less`;
-  } else {
-    big = gbp(s.left);
-    sub = s.spentToday ? `left today · ${gbp(s.spentToday)} spent of ${gbp(s.perDay)}` : `for today · ${gbp(s.free)} to last ${s.days} day${s.days === 1 ? '' : 's'}`;
-  }
-  const bar = s.free > 0 && s.spentToday ? `<div class="bar ${s.left < 0 ? 'over' : ''}"><i style="width:${Math.min(1, s.spentToday / s.perDay) * 100}%"></i></div>` : '';
-  return `${head}<section class="panel pad safe">
-    <div class="safe-big ${cls}">${big}</div>
-    <div class="muted small">${sub}</div>
-    ${bar}
-    ${s.age > 14 ? `<p class="safe-note">Your balance is ${s.age} days old. Check it against Barclays to keep this accurate.</p>` : ''}
-    <button class="more" data-act="safe-why">How it's worked out ${icon('chevR')}</button>
-  </section>`;
+  const kept = budgets.filter(b => b.kept).length;
+  return { m, gr, budgets, kept, xp: gr.xp + kept * BUDGET_XP };
 }
 
 /* Screens */
@@ -175,14 +95,13 @@ function moneyCard() {
       <div class="tr-amount setup">Start logging</div>
       <div class="tr-sub">Log income and spending in pounds, and see exactly where your money goes.</div>
     </button>`;
-  const m = monthStats(ymNow()), s = safeToSpend();
-  const safe = !s ? '' : s.free < 0 ? `<b class="neg">${gbp(-s.free)} short</b> before payday` : `<b>${gbp(Math.max(0, s.left))}</b> safe to spend today`;
+  const m = monthStats(ymNow());
   return `<button class="tracker" data-go="money">
       <div class="tr-top">${icon('card')}<span class="grow">Money · ${ymLabel(m.ym, { month: 'long' })}</span>${icon('chevR')}</div>
       <div class="tr-amount ${m.left < 0 ? 'neg' : ''}">${gbp(m.left)}</div>
       <div class="tr-sub">left this month</div>
       <div class="bar"><i style="width:${m.income ? Math.min(100, (m.out / m.income) * 100) : 0}%"></i></div>
-      <div class="tr-foot"><span>${safe || `In ${gbp(m.income)} · Out ${gbp(m.out)}`}</span><span>${m.ptw == null ? '' : `${Math.round(m.ptw * 100)}% put to work`}</span></div>
+      <div class="tr-foot"><span>In ${gbp(m.income)} · Out ${gbp(m.out)}</span><span>${m.ptw == null ? '' : `${Math.round(m.ptw * 100)}% put to work`}</span></div>
     </button>`;
 }
 
@@ -198,7 +117,7 @@ function moneyView() {
   const today = todayISO();
   const canNoSpend = isNow && !state.money.tx.some(t => t.date === today && (t.type === 'expense' || t.type === 'nospend'));
   const canClose = ym < ymNow() && m.txCount && !closed;
-  const budgets = budgetStatus(ym), treat = treatBalance();
+  const budgets = budgetStatus(ym);
 
   // Transactions: today only by default (this month); the full month is one tap away
   const todayOnly = isNow && !showAllTx;
@@ -233,8 +152,6 @@ function moneyView() {
       ${canNoSpend ? `<button class="small-btn" data-act="nospend">${icon('leaf')} Mark today as a no-spend day · +${TX_XP.nospend} XP</button>` : ''}
     </section>
 
-    ${isNow ? safeCard() : ''}
-
     ${isNow ? questStrip('money') : ''}
 
     <div class="section-title"><span>Put to work</span><span>${closed ? 'Final grade' : isNow ? 'Grade so far' : 'Projected grade'}</span></div>
@@ -258,15 +175,6 @@ function moneyView() {
       <button class="more" data-act="budget-new">${icon('plus')} Add a budget</button>
     </section>
 
-    <div class="section-title"><span>Treat fund</span><span>5% of what you put to work</span></div>
-    <section class="panel pad treat">
-      <div class="treat-top">
-        <div class="treat-mark">${icon('sparkle')}</div>
-        <div><div class="treat-bal">${gbp(treat)}</div><div class="muted small">ready to spend, guilt-free</div></div>
-        ${treat > 0 ? `<button class="btn btn-ghost btn-sm" data-act="treat-spend">Spend</button>` : ''}
-      </div>
-      <p class="treat-note">${closed ? `${ymLabel(ym, { month: 'long' })} added ${gbp(closed.treat || 0)}.` : `${isNow ? 'This month is on track to add' : 'Closing this month adds'} <b>${gbp(treatFor(m))}</b>${isNow ? ' when you close it' : ''}.`}</p>
-    </section>
 
     ${isNow ? habitsCard() : ''}
 
@@ -397,7 +305,7 @@ function txItem(t) {
     const c = catOf(t.cat);
     ic = c.icon;
     title = t.note ? esc(t.note) : c.name;
-    sub = [t.note ? c.name : '', t.recurringId ? 'Recurring' : '', t.treat ? 'Treat fund' : ''].filter(Boolean).join(' · ');
+    sub = [t.note ? c.name : '', t.recurringId ? 'Recurring' : ''].filter(Boolean).join(' · ');
     amt = t.type === 'income' ? '+' + gbp(t.amount) : gbp(-t.amount);
   }
   return `<div class="hist ${t.type}">
@@ -422,11 +330,11 @@ function recItem(r) {
 /* Sheets */
 const defaultDate = () => (moneyMonth === ymNow() || view !== 'money' ? todayISO() : ymLastDay(moneyMonth));
 
-function txSheet(type, { treat = false } = {}) {
-  const isInc = type === 'income', cats = isInc ? INCOME_CATS : EXPENSE_CATS, fund = treatBalance();
+function txSheet(type) {
+  const isInc = type === 'income', cats = isInc ? INCOME_CATS : EXPENSE_CATS;
   openSheet(`
-    <h2>${treat ? 'Treat yourself' : isInc ? 'Money in' : 'Money out'}</h2>
-    <p class="lead">${treat ? `You've earned ${gbp(fund)}. Spend it on something you enjoy, guilt-free.` : isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
+    <h2>${isInc ? 'Money in' : 'Money out'}</h2>
+    <p class="lead">${isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
     <form id="f-tx" data-type="${type}">
       <label class="field"><span>Amount (£)</span><input name="amount" ${moneyAttrs('gbp')} placeholder="0.00"></label>
       <div class="cats">${cats.map((c, i) => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${isInc && i === 0 ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
@@ -435,7 +343,6 @@ function txSheet(type, { treat = false } = {}) {
         <label class="field"><span>Date</span><input name="date" type="date" value="${defaultDate()}"></label>
       </div>
       <label class="check-row"><input type="checkbox" name="recurring"> Repeat every month</label>
-      ${!isInc && fund > 0 ? `<label class="check-row"><input type="checkbox" name="treat" ${treat ? 'checked' : ''}> Pay from treat fund (${gbp(fund)} available)</label>` : ''}
       <div id="tx-err" class="err"></div>
       ${sheetButtons('Save')}
     </form>`);
@@ -494,7 +401,7 @@ function dueSheet() {
 }
 
 function closeMonthSheet(ym) {
-  const { m, gr, budgets, kept, treat, xp } = closeSummary(ym);
+  const { m, gr, budgets, kept, xp } = closeSummary(ym);
   openSheet(`
     <div class="reward-kicker">${ymLabel(ym)} · month close</div>
     <div class="grade-big">${gr.grade}</div>
@@ -505,51 +412,12 @@ function closeMonthSheet(ym) {
       ${kv('Put to work', m.ptw == null ? '—' : Math.round(m.ptw * 100) + '%', '', 'pos')}
       ${kv('Days logged', m.logDays)}
       ${budgets.length ? kv('Budgets kept', `${kept} of ${budgets.length}`, kept ? `+${kept * BUDGET_XP} XP` : '', kept ? 'pos' : '') : ''}
-      ${kv('Treat fund', `+${gbp(treat)}`, '5% of what you put to work', 'pos')}
       ${kv('Left over', gbp(m.left), '', m.left >= 0 ? 'pos' : 'neg')}
     </div>
     <div class="reward-xp">+${xp.toLocaleString('en-IN')} XP</div>
     <button class="btn btn-primary btn-block" data-act="claim-month" data-ym="${ym}">Claim and close ${ymLabel(ym, { month: 'long' })}</button>
     ${m.left > 0 && state.loan ? `<button class="btn btn-text btn-block" data-act="leftover" data-amt="${Math.floor(m.left)}">Send the ${gbp(Math.floor(m.left))} left over to the loan</button>` : ''}`,
     { center: true });
-}
-
-function balanceSheet() {
-  const M = state.money, s = safeToSpend(), day = paydayDay();
-  const opts = [`<option value="0" ${day ? '' : 'selected'}>Not sure: plan to the end of each month</option>`,
-    ...[...Array(31)].map((_, i) => `<option value="${i + 1}" ${day === i + 1 ? 'selected' : ''}>The ${ordinal(i + 1)} of each month</option>`)].join('');
-  openSheet(`
-    <h2>Barclays balance</h2>
-    <p class="lead">Log what you've spent first, then type the balance your Barclays app shows right now. After that, the app keeps it up to date from what you log.</p>
-    <form id="f-balance">
-      <label class="field"><span>Balance now (£)</span><input name="bal" ${moneyAttrs('gbp')} placeholder="${s ? moneyValue('gbp', Math.abs(s.now)) : '0.00'}"></label>
-      <label class="check-row"><input type="checkbox" name="neg"> My account is overdrawn (a minus balance)</label>
-      <label class="field"><span>Payday</span><select name="payday">${opts}</select><small>When your wages land. Safe to spend makes the money last until then.</small></label>
-      <div id="bal-err" class="err"></div>
-      ${sheetButtons('Save balance')}
-    </form>`);
-  setTimeout(() => $('#f-balance [name=bal]')?.focus(), 80);
-}
-
-function safeWhySheet() {
-  const s = safeToSpend();
-  if (!s) return balanceSheet();
-  const until = paydayDay() ? `payday, ${fmtDayShort(s.payday)}` : 'the end of the month';
-  openSheet(`
-    <h2>Safe to spend</h2>
-    <p class="lead">Your balance, minus what still has to go out before ${until}, shared across the ${s.days} day${s.days === 1 ? '' : 's'} left (today included).</p>
-    <div class="panel">
-      ${kv('Barclays balance', gbp(s.b.amount), `entered ${fmtDayShort(s.b.date)}`)}
-      ${s.inSince ? kv('Money in since', '+' + gbp(s.inSince), '', 'pos') : ''}
-      ${s.outSince ? kv('Money out since', gbp(-s.outSince)) : ''}
-      ${kv('Balance now', gbp(s.now), 'estimated')}
-      ${s.set.map(x => kv(x.label, gbp(-x.amount), x.sub)).join('')}
-      ${s.spentToday ? kv('Spent today', gbp(s.spentToday), 'part of today\'s share') : ''}
-      ${kv(s.free < 0 ? 'Short by' : 'To last until ' + (paydayDay() ? 'payday' : 'month end'), gbp(Math.abs(s.free)), '', s.free < 0 ? 'neg' : 'pos')}
-      ${s.free > 0 ? kv('Each day', gbp(s.perDay), `${s.days} day${s.days === 1 ? '' : 's'}`) : ''}
-    </div>
-    <p class="hint">Bills come from your recurring items. Weekly pay or cash tips aren't predicted: log them when they arrive and the number goes up.</p>
-    <div class="sheet-actions"><button class="btn btn-ghost" data-close>Close</button><button class="btn btn-primary" data-act="balance">Update balance</button></div>`);
 }
 
 function budgetSheet(catId = '') {
@@ -598,10 +466,7 @@ const moneyForms = {
     if (!amount) return err('Enter an amount.');
     if (!catId) return err('Pick a category.');
     const date = f.elements.date.value || todayISO(), note = f.elements.note.value.trim();
-    const useTreat = !!f.elements.treat?.checked;
-    if (useTreat && amount > treatBalance() + 0.004) return err(`Your treat fund has ${gbp(treatBalance())}.`);
     const t = { type, amount, cat: catId, note, date };
-    if (useTreat) t.treat = true;
     if (f.elements.recurring.checked) {
       const r = { id: uid(), type, amount, cat: catId, note, day: parseISO(date).getDate() };
       state.money.recurring.push(r);
@@ -611,23 +476,10 @@ const moneyForms = {
     moneyMonth = date.slice(0, 7);
     addTx(t, x => {
       let msg = `${x.note ? esc(x.note) : catOf(x.cat).name} <b>${type === 'income' ? '+' : '−'}${gbp(x.amount)}</b> · <b>${xpLabel(x)}</b>`;
-      if (x.treat) msg = `Guilt-free. Enjoy it. ${msg}`;
       const b = type === 'expense' && budgetStatus(x.date.slice(0, 7)).find(y => y.id === x.cat);
       if (b) msg += b.kept ? ` · ${gbp(b.left)} left in ${catOf(b.id).name}` : ` · <b>${catOf(b.id).name} over budget by ${gbp(-b.left)}</b>`;
       return msg;
     });
-  },
-
-  'f-balance'(f) {
-    const raw = f.elements.bal.value, amount = num(raw);
-    if (!raw.trim()) return ($('#bal-err').textContent = 'Enter the balance from your Barclays app.');
-    state.money.balance = { amount: f.elements.neg.checked ? -amount : amount, date: todayISO(), ts: Date.now() };
-    state.money.payday = Number(f.elements.payday.value);
-    save();
-    closeSheet();
-    render();
-    const s = safeToSpend();
-    toast(s.free < 0 ? `Balance saved. You're <b>${gbp(-s.free)} short</b> before payday.` : `Balance saved. Safe to spend today: <b>${gbp(Math.max(0, s.left))}</b>.`);
   },
 
   'f-budget'(f) {
@@ -682,7 +534,12 @@ registerTracker({
   order: 10,
 
   migrate(s) {
-    s.money = Object.assign({ tx: [], recurring: [], closed: {}, budgets: { groceries: 120 }, balance: null, payday: 0 }, s.money);
+    s.money = Object.assign({ tx: [], recurring: [], closed: {}, budgets: { groceries: 120 } }, s.money);
+    // The treat fund is gone: keep its milestone only for whoever already earned it, so that XP stays
+    if (!s.money.tx.some(t => t.treat)) {
+      const i = MILESTONES.findIndex(x => x.id === 'treat-1');
+      if (i >= 0) MILESTONES.splice(i, 1);
+    }
   },
 
   views: { money: moneyView },
@@ -805,9 +662,9 @@ registerTracker({
     },
     'claim-month': (el, d) => {
       const c = closeSummary(d.ym), g0 = globalStats();
-      state.money.closed[d.ym] = { grade: c.gr.grade, score: c.gr.score, xp: c.xp, ptw: c.m.ptw ?? 0, budgetsKept: c.kept, treat: c.treat, ts: Date.now() };
+      state.money.closed[d.ym] = { grade: c.gr.grade, score: c.gr.score, xp: c.xp, ptw: c.m.ptw ?? 0, budgetsKept: c.kept, ts: Date.now() };
       save(); closeSheet(); render();
-      finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>${c.treat ? ` · <b>${gbp(c.treat)}</b> added to your treat fund` : ''}`, { big: true });
+      finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>`, { big: true });
     },
     mix: (el, d) => focusMix(d.g),
     'tx-all': () => { showAllTx = !showAllTx; render(); },
@@ -818,10 +675,7 @@ registerTracker({
       save(); closeSheet(); render();
       toast('Budget removed.');
     },
-    'treat-spend': () => txSheet('expense', { treat: true }),
     leftover: (el, d) => { closeSheet(); transferSheet(d.amt); },
-    balance: () => balanceSheet(),
-    'safe-why': () => safeWhySheet(),
   },
   onInput(ev) { if (ev.target.closest('#f-transfer')) updateTransferPreview(); },
   onChange(ev) { if (ev.target.closest('#f-transfer')) updateTransferPreview(); },
