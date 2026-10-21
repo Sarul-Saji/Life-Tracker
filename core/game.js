@@ -149,7 +149,7 @@ MILESTONES.push(
   ms('streak-30', 'Thirty-day habit', 'Maximum momentum', 1500, g => g.best >= 30),
   ms('streak-100', 'One hundred days', 'This is who you are now', 5000, g => g.best >= 100),
   ms('quest-1', 'First quest complete', '', 150, g => g.questsDone >= 1),
-  ms('chest-1', 'First full week', 'All three quests in one week', 300, g => g.chests >= 1),
+  ms('chest-1', 'First full week', 'Every weekly quest done in one week', 300, g => g.chests >= 1),
   ms('chest-10', 'Ten full weeks', '', 2000, g => g.chests >= 10),
 );
 

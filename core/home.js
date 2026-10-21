@@ -66,7 +66,7 @@ function xpSheet() {
     </div>
     <div class="section-title"><span>Bonuses</span></div>
     <div class="panel">
-      ${kv('Weekly quest', `+${QUEST_XP} each`, `+${CHEST_XP} for all three`)}
+      ${kv('Weekly quest', `+${QUEST_XP} each`, `+${CHEST_XP} for completing them all`)}
       ${TRACKERS.map(t => t.bonusRows?.() || '').join('')}
       ${kv('Milestones', '+100 to +10,000', `${g.unlocked.length} of ${MILESTONES.length} unlocked`)}
     </div>
