@@ -79,3 +79,10 @@
 .w-tip-d { color: var(--ink2); }
 .w-note b { color: var(--ink); }
 .hist.weighrow .mark { background: var(--accent-soft); color: var(--accent); }
+
+/* Deficit goals: what you burn today and the run of deficit days */
+.def-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); }
+.def-row { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.def-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.def-note p { margin-top: 6px; }
+.def-note p b { color: var(--ink2); font-weight: 600; }

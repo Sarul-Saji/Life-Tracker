@@ -14,7 +14,10 @@ const DEFAULT_MEALS = [
   { id: 'm-chickenrice', name: 'Chicken and rice', kcal: 650, protein: 60 },
 ];
 const GYM_KCAL_PER_KG_HOUR = 4;   // deliberately conservative: gym trackers tend to overstate burn
-const GOALS = { lose: { name: 'Lose fat', adj: -500 }, maintain: { name: 'Maintain', adj: 0 }, build: { name: 'Build muscle', adj: 300 } };
+const GOALS = { lose: { name: 'Lose fat', adj: -500 }, recomp: { name: 'Lose fat, build muscle', adj: -400 }, maintain: { name: 'Maintain', adj: 0 }, build: { name: 'Build muscle', adj: 300 } };
+// Deficit goals: a day is a win when you eat at or under target, but not below your body-at-rest burn
+const isDeficitGoal = () => ['lose', 'recomp'].includes(H().profile.goal);
+const CAL_QUEST_FROM = '2026-10-19';   // the calorie quest slot starts this week, so past weeks stay as they were
 const WATER_GOAL = 8;
 const H_XP = { food: 10, water: 3, gym: 60, weights: 15 };
 const SHIFT_GYM_BONUS = 40;   // extra XP for training on a shift day
@@ -42,14 +45,29 @@ function fuelDay(date) {
   const fries = food.some(f => f.fries), shift = dayType(date) === 'shift', t = dayTarget(date);
   if (!food.length) return { kcal, protein, water, fries, shift, t, grade: null };
   // Today isn't over, so being under target isn't a miss yet; only going over counts against you
-  const ratio = kcal / t.total, off = date === todayISO() && ratio <= 1 ? 0 : Math.abs(ratio - 1);
+  // On a deficit goal, anywhere between body-at-rest and target is full marks
+  const ratio = kcal / t.total, inDeficit = isDeficitGoal() && ratio <= 1 && kcal >= bmr(H().profile);
+  const off = inDeficit || (date === todayISO() && ratio <= 1) ? 0 : Math.abs(ratio - 1);
   const score = (off <= 0.1 ? 40 : off <= 0.2 ? 25 : 10) + Math.min(1, protein / proteinTarget()) * 30
     + Math.min(1, water / WATER_GOAL) * 15 + (shift && fries ? 0 : 15);
   const grade = score >= 85 ? 'A' : score >= 70 ? 'B' : score >= 55 ? 'C' : 'D';
   return { kcal, protein, water, fries, shift, t, score, grade };
 }
 
-const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0 };
+// A finished day with food logged is a calorie win: in your deficit (deficit goals) or within 10% of target (others)
+function calWin(date) {
+  const f = fuelDay(date);
+  if (!f.grade || date >= todayISO()) return false;
+  if (isDeficitGoal()) return f.kcal <= f.t.total && f.kcal >= bmr(H().profile);
+  return Math.abs(f.kcal / f.t.total - 1) <= 0.1;
+}
+function calStreak() {
+  let d = addDays(todayISO(), -1), n = 0;
+  while (calWin(d)) { n++; d = addDays(d, -1); }
+  return n;
+}
+
+const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0, defDays: 0, defBest: 0 };
 function healthStats() {
   const h = H();
   if (!h) return ZERO_HEALTH;
@@ -61,7 +79,11 @@ function healthStats() {
   for (const w of hit) { run = prev && addDays(prev, 7) === w ? run + 1 : 1; best = Math.max(best, run); prev = w; }
   let cur = 0, wk = perWeek[thisWk] >= target ? thisWk : addDays(thisWk, -7);
   while (perWeek[wk] >= target) { cur++; wk = addDays(wk, -7); }
-  const fuel = [...new Set(h.food.map(f => f.date))].map(fuelDay);
+  const foodDays = [...new Set(h.food.map(f => f.date))].sort(), fuel = foodDays.map(fuelDay);
+  // Deficit milestones only count while you're on a deficit goal
+  const defWins = isDeficitGoal() ? foodDays.filter(calWin) : [];
+  let defBest = 0, defRun = 0, defPrev = null;
+  for (const d of defWins) { defRun = defPrev && addDays(defPrev, 1) === d ? defRun + 1 : 1; defBest = Math.max(defBest, defRun); defPrev = d; }
   const waterByDay = {};
   h.water.forEach(w => { waterByDay[w.date] = (waterByDay[w.date] || 0) + 1; });
   return {
@@ -72,6 +94,7 @@ function healthStats() {
     doubles: new Set(h.gym.filter(s => dayType(s.date) === 'shift').map(s => s.date)).size,
     weighs: weighIns().length,
     weighWeeks: new Set(weighIns().map(w => weekStart(w.date))).size,
+    defDays: defWins.length, defBest,
   };
 }
 
@@ -110,7 +133,7 @@ function weightRate(series) {
 function weightVerdict(rate, goal, kg) {
   if (rate == null) return 'Weigh in 3 or 4 times a week, first thing in the morning. After about two weeks this tells you whether your calorie target is right.';
   const r = `${kgFmt(Math.abs(rate))} kg a week`;
-  if (goal === 'lose') {
+  if (goal === 'lose' || goal === 'recomp') {
     if (rate <= -0.01 * kg) return `Losing about <b>${r}</b>. That's fast: fine for a few weeks, but eat a little more if training feels flat, or you'll lose muscle too.`;
     if (rate <= -0.2) return `Losing about <b>${r}</b>. Right on track.`;
     if (rate < -0.05) return `Losing slowly, about <b>${r}</b>. Still progress. Eat about 200 kcal a day less if you want it faster.`;
@@ -183,6 +206,7 @@ function healthView() {
       <div class="bar ${f.kcal > t.total * 1.1 ? 'over' : ''}"><i style="width:${Math.min(100, (f.kcal / t.total) * 100)}%"></i></div>
       <div class="hero-meta"><span>${left >= 0 ? `${left.toLocaleString('en-GB')} kcal left` : `${(-left).toLocaleString('en-GB')} kcal over`}</span>
         <button class="link" data-act="h-why">How is this worked out?</button></div>
+      ${isDeficitGoal() ? deficitNote(f) : ''}
     </section>
 
     <div class="tiles">
@@ -217,6 +241,19 @@ function healthView() {
       <span>Your details</span><small>${GOALS[h.profile.goal].name} · ${h.profile.weightKg} kg · gym ${target}/week</small>${icon('chevR')}
     </button>
   </div>`;
+}
+
+// Maintenance (what you burn today) vs what you've eaten, and the run of deficit days
+function deficitNote(f) {
+  const t = f.t, maint = t.total - t.adj, n = calStreak();
+  const status = f.kcal > maint ? `Over maintenance: <b>no deficit today</b>.`
+    : f.kcal > t.total ? `Over target, but still <b>${(maint - f.kcal).toLocaleString('en-GB')} kcal under maintenance</b>: a small deficit.`
+    : `Finish at or under target to bank a <b>deficit day</b>.`;
+  return `<div class="def-note">
+      <div class="def-row"><span>You burn today</span><b>~${maint.toLocaleString('en-GB')} kcal</b></div>
+      <div class="def-row"><span>Deficit streak</span><b>${n ? `${n} day${n > 1 ? 's' : ''}` : '—'}</b></div>
+      <p>${status}</p>
+    </div>`;
 }
 
 function foodItem(e) {
@@ -441,17 +478,19 @@ function whySheet() {
       ${kv('Everyday movement', sign(t.base - b), '×1.3 for normal daily life')}
       ${kv('Shift', t.shift ? sign(t.shift) : '—', t.shift ? 'walking on a long shift' : dayType(today) === 'off' ? 'day off' : 'rota not set')}
       ${kv('Gym today', t.gym ? sign(t.gym) : '—')}
-      ${kv(`Goal: ${GOALS[p.goal].name}`, t.adj ? sign(t.adj) : '—')}
+      ${kv('Maintenance', `${(t.total - t.adj).toLocaleString('en-GB')} kcal`, 'what you burn today')}
+      ${kv(`Goal: ${GOALS[p.goal].name}`, t.adj ? sign(t.adj) : '—', t.adj < 0 ? 'your daily deficit' : '')}
       ${kv("Today's target", `${t.total.toLocaleString('en-GB')} kcal`, '', 'pos')}
     </div>
     <div class="section-title"><span>Fuel score${f.grade ? ` · ${f.grade} so far` : ''}</span></div>
     <div class="panel">
-      ${kv('Calories near target', '40 pts', 'within 10% of target')}
+      ${kv(isDeficitGoal() ? 'Calories in your deficit' : 'Calories near target', '40 pts', isDeficitGoal() ? `at or under target, but above ${b.toLocaleString('en-GB')}` : 'within 10% of target')}
       ${kv(`Protein (${proteinTarget()} g)`, '30 pts', '1.6 g per kg of body weight')}
       ${kv(`Water (${WATER_GOAL} glasses)`, '15 pts')}
       ${kv('Fry-free on a shift', '15 pts', 'days off count automatically')}
     </div>
     <p class="hint">A 85+, B 70+, C 55+, D below.</p>
+    ${isDeficitGoal() ? `<p class="hint"><b>Deficit day:</b> a finished day where you ate at or under your target, but not less than ${b.toLocaleString('en-GB')} kcal (your body at rest). Eating less than that isn't a win: it costs muscle and energy for your shifts.</p>` : ''}
     <button class="btn btn-primary btn-block" data-close>Got it</button>`);
 }
 
@@ -591,10 +630,15 @@ registerTracker({
     gymT: { text: 'Hit your weekly gym target', goal: () => state.health?.settings.gymTarget || 3, get: w => w.gym },
     fry3: { text: 'Fry-free on 3 shifts', goal: 3, get: w => w.fryFree },
     protein4: { text: 'Hit your protein target on 4 days', goal: 4, get: w => w.proteinDays },
+    calT4: { text: 'Hit your calorie target on 4 days', goal: 4, get: w => w.calDays },
     water4: { text: `Drink ${WATER_GOAL} glasses of water on 4 days`, goal: 4, get: w => w.waterDays },
   },
   // A fourth weekly quest, from the week Health was set up
-  questSlots: [{ ids: HEALTH_SLOT, active: wk => !!state.health && wk >= weekStart(state.health.createdAt) }],
+  questSlots: [
+    { ids: HEALTH_SLOT, active: wk => !!state.health && wk >= weekStart(state.health.createdAt) },
+    // Calorie target (your deficit on a fat-loss goal); days count once they're over
+    { ids: ['calT4'], active: wk => !!state.health && wk >= CAL_QUEST_FROM && wk >= weekStart(state.health.createdAt) },
+  ],
   weekData(w, inWeek) {
     if (!state.health) return;
     const h = state.health;
@@ -602,6 +646,7 @@ registerTracker({
     const days = [...new Set(h.food.filter(f => inWeek(f.date)).map(f => f.date))].map(fuelDay);
     w.fryFree = days.filter(f => f.shift && !f.fries).length;
     w.proteinDays = days.filter(f => f.protein >= proteinTarget()).length;
+    w.calDays = [...new Set(h.food.filter(f => inWeek(f.date)).map(f => f.date))].filter(calWin).length;
     const wc = {};
     h.water.filter(x => inWeek(x.date)).forEach(x => { wc[x.date] = (wc[x.date] || 0) + 1; });
     w.waterDays = Object.values(wc).filter(n => n >= WATER_GOAL).length;
@@ -626,6 +671,9 @@ registerTracker({
     ms('h-weigh-1', 'First weigh-in', '', 100, g => g.Hs.weighs >= 1),
     ms('h-weigh-w4', 'Weighed in on 4 weeks', 'Enough to see a trend', 250, g => g.Hs.weighWeeks >= 4),
     ms('h-weigh-w12', 'Weighed in on 12 weeks', 'A trend you can trust', 800, g => g.Hs.weighWeeks >= 12),
+    ms('h-def-1', 'First deficit day', 'Under target, still well fed', 150, g => g.Hs.defDays >= 1),
+    ms('h-def-7', 'Seven deficit days in a row', '', 600, g => g.Hs.defBest >= 7),
+    ms('h-def-30', 'Thirty deficit days', 'Fat loss on autopilot', 1500, g => g.Hs.defDays >= 30),
   ],
 
   xpRows: () => kv('Log a meal', `+${H_XP.food}`) + kv('Glass of water', `+${H_XP.water}`, `up to ${WATER_GOAL} a day`)
