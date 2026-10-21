@@ -61,7 +61,14 @@ global scope, so **top-level names must be unique across all files** (prefix new
 - `.tools/fixture.js` (not uploaded) builds a rich test dataset and snapshots every screen: useful before/after refactors.
 - Clear the test data from your local server when done. Never touch the owner's phone data.
 
-## Uploading (Git) — the folder is shared by several sessions
+## Uploading (Git) — several sessions work at once
+**If your session runs in a worktree** (your folder is under `.claude/worktrees/`, on a branch other than `main`):
+you have a private copy, so nobody else's edits are in your folder. To publish:
+`git add <your files>` → `git commit -F <file>` → `git pull --rebase origin main` → re-test → `git push origin HEAD:main`.
+If the rebase reports a conflict in a file you don't own, stop and tell the owner to bring it to "Compound: main build".
+Local test data and `.tools/` don't exist in worktrees; that's fine.
+
+**If you work directly in the main folder** (on `main`), other sessions may be editing files next to yours:
 1. Stage **only your own files by name**: `git add trackers/health.js trackers/health.css`. **Never `git add -A` or `git add .`**
    — it would upload another session's half-finished work.
 2. Commit with a message file: `git commit -F <file>` (PowerShell 5.1 breaks quoted multi-line messages). End messages with

@@ -8,8 +8,9 @@
 lifequest-backup-*.json
 compound-backup-*.json
 
-# Local-only tool settings
+# Local-only tool settings and per-session working copies
 .claude/settings.local.json
+.claude/worktrees/
 
 # Local dev tools
 .tools/
