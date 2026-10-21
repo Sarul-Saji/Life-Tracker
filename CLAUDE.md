@@ -9,6 +9,20 @@ Plain HTML/CSS/JS — no build step, no frameworks, no npm. Every push to `main`
 - They live in London (paid in GBP), have an Indian student loan (INR), work long hospitality shifts.
 - Several Claude sessions may work on this folder **at the same time**. Follow the ownership and Git rules below.
 
+## Keep usage light (the owner's Claude limit is shared by every session)
+- **Read only what you need.** Use Grep to find the relevant function, then Read with offset/limit. Don't read whole
+  tracker files or core files "for context"; the hook list at the top of `core/game.js` and this file are usually enough.
+- **Edit, don't rewrite.** Use small targeted edits; never re-output a whole file to change a few lines.
+- **Test cheaply.** Default to text checks via the browser JavaScript tool (render the view, read `innerText`, check
+  for console errors, measure overflow). Take a screenshot only for genuinely visual changes or when the owner asks,
+  and at most one or two per change, at scale 0.5.
+- **Match testing to the change.** Small fix → quick check of that screen. New feature → test its flows once.
+  Full app-wide audits only when the owner asks.
+- **Keep replies short.** Lead with what changed and how to see it; add detail only if asked.
+- **Batch.** If the owner lists several changes, do them together and upload once.
+- **Long conversation?** When a session has done a lot of work, suggest the owner starts a fresh session for the next
+  feature. This rulebook and the code carry all the context a new session needs.
+
 ## Architecture
 ```
 index.html            loads everything; one <link> + one <script> line per tracker
