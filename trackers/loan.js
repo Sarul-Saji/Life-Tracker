@@ -37,9 +37,9 @@ function soonerLabel(m) {
 }
 
 // Like simulate(), but stops once the balance drops to goalBal: how many EMIs until a checkpoint
-function monthsToReach(goalBal, extra = 0) {
+function monthsToReach(goalBal, extra = 0, fromBal = loanBalance()) {
   const r = state.loan.rate / 1200, pay = state.loan.emi + extra;
-  let b = Math.max(0, loanBalance()), m = 0;
+  let b = Math.max(0, fromBal), m = 0;
   while (b > goalBal + 0.5) {
     if (pay <= b * r || m > 1200) return Infinity;
     b -= pay - b * r;
@@ -67,10 +67,56 @@ function checkTargetHit(ym) {
 }
 const recheckTargetHits = () => Object.keys(state.loan?.targetHits || {}).forEach(ym => checkTargetHit(ym));
 
+// Extra notes for the toast after an extra payment: target hit, personal record broken
+let loanRecordNote = '';
 function targetHitNote() {
-  const h = loanTargetHit;
+  const h = loanTargetHit, rec = loanRecordNote;
   loanTargetHit = null;
-  return h ? ` · <b>${ymLabel(h.ym, { month: 'long' })} target hit +${h.xp} XP</b>` : '';
+  loanRecordNote = '';
+  return (h ? ` · <b>${ymLabel(h.ym, { month: 'long' })} target hit +${h.xp} XP</b>` : '') + (rec ? ` · <b>${rec}</b>` : '');
+}
+
+/* ---------- Race the bank ----------
+   A "ghost" loan that pays exactly your EMIs and nothing extra. Each EMI's interest is scaled from your
+   real one (so rate changes hit you both the same), and bank syncs correct both. The gap is all yours. */
+function bankRace() {
+  const L = state.loan;
+  const log = [...L.log].sort((a, b) => a.date.localeCompare(b.date) || a.ts - b.ts);
+  let you = L.setupBalance, bank = L.setupBalance;
+  for (const e of log) {
+    if (e.type === 'emi') {
+      const i = you > 0 ? e.interest * (bank / you) : bank * L.rate / 1200;
+      bank -= Math.max(0, Math.min(bank, e.amount - i));
+    } else if (e.type === 'sync') bank = Math.max(0, bank - e.principal);
+    you -= e.principal;
+  }
+  you = Math.max(0, you);
+  const ahead = bank - you, last = parseISO(lastEmiISO());
+  const bankMonths = simulate(bank).months;
+  return {
+    you, bank, ahead,
+    months: ahead > 0.5 ? monthsToReach(you, 0, bank) : 0,
+    bankFree: addMonths(last, Math.ceil(bankMonths)),
+    youRepaid: 1 - you / L.original, bankRepaid: 1 - bank / L.original,
+  };
+}
+
+/* ---------- Personal records ---------- */
+function loanRecords() {
+  const L = state.loan, extras = L.log.filter(e => e.type === 'extra');
+  const biggest = extras.reduce((m, e) => (!m || e.amount > m.amount ? e : m), null);
+  const byMonth = {};
+  extras.forEach(e => { const ym = e.date.slice(0, 7); byMonth[ym] = (byMonth[ym] || 0) + e.amount; });
+  const bestMonth = Object.entries(byMonth).sort((a, b) => b[1] - a[1])[0] || null;
+  // Monthly targets hit in a row
+  const hits = Object.keys(L.targetHits || {}).sort();
+  let best = 0, run = 0, prev = null;
+  for (const ym of hits) { run = prev && ymAdd(prev, 1) === ym ? run + 1 : 1; best = Math.max(best, run); prev = ym; }
+  let cur = 0, ym = L.targetHits?.[ymNow()] ? ymNow() : ymAdd(ymNow(), -1);
+  while (L.targetHits?.[ym]) { cur++; ym = ymAdd(ym, -1); }
+  const sent = state.money.tx.filter(t => t.type === 'transfer' && t.amount > 0 && t.inr > 0);
+  const bestRate = sent.reduce((m, t) => (!m || t.inr / t.amount > m.inr / m.amount ? t : m), null);
+  return { biggest, bestMonth, streak: { cur, best }, bestRate };
 }
 
 function loanStats() {
@@ -105,6 +151,7 @@ function loanStats() {
 // auto = logged by the app itself (the monthly EMI), so it earns XP but doesn't count as you showing up.
 function makeLoanEntry(type, amount, date, { auto = false } = {}) {
   loanTargetHit = null;
+  loanRecordNote = '';
   const bal = Math.max(0, loanBalance());
   const e = { id: uid(), ts: Date.now(), type, date, amount };
   if (auto) e.auto = true;
@@ -114,6 +161,12 @@ function makeLoanEntry(type, amount, date, { auto = false } = {}) {
     e.principal = Math.max(0, Math.min(bal, amount - e.interest));
     base = XP.emi;
   } else {
+    // Personal records: announced only when an earlier record is beaten
+    const prev = state.loan.log.filter(x => x.type === 'extra'), ym = date.slice(0, 7), totals = {};
+    prev.forEach(x => { const m = x.date.slice(0, 7); totals[m] = (totals[m] || 0) + x.amount; });
+    const [bestYm, bestTotal] = Object.entries(totals).sort((a, b) => b[1] - a[1])[0] || [];
+    if (prev.length && amount > Math.max(...prev.map(x => x.amount))) loanRecordNote = 'New record: your biggest payment yet';
+    else if (bestYm && bestYm !== ym && (totals[ym] || 0) + amount > bestTotal) loanRecordNote = 'New record: your best month for extra payments';
     e.interest = 0;
     e.principal = Math.min(bal, amount);
     const now = simulate(bal), after = simulate(bal - e.principal);
@@ -190,7 +243,9 @@ function loanView() {
 
     ${targetPanel(s)}
     ${roadPanel(s)}
+    ${racePanel(s)}
     ${boughtPanel(s)}
+    ${recordsPanel()}
 
     <div class="section-title"><span>Overview</span></div>
     <section class="panel">
@@ -271,6 +326,44 @@ function roadPanel(s) {
       ${later.map(x => kv(x.name, x.when, `${lakh(x.toGo)} to go · +${checkpointXp(x.p).toLocaleString('en-IN')} XP`)).join('')}
       ${next ? `<p class="hint">Dates assume your EMI${t ? ` plus your ${inr(t)} monthly target` : ' only. Set a monthly target to pull them closer'}.</p>` : ''}
     </section>`;
+}
+
+// You against the bank's own schedule (EMI only), on a track that zooms to the current quarter of the loan
+function racePanel(s) {
+  if (s.bal <= 0) return '';
+  const r = bankRace(), top = Math.min(100, Math.max(25, Math.ceil((Math.max(r.youRepaid, r.bankRepaid) * 100 + 0.01) / 25) * 25));
+  const lane = (who, frac, cls) => `<div class="lane ${cls}"><span class="who">${who}</span>
+    <div class="track"><i style="width:${Math.min(100, Math.max(0, frac * 100) / top * 100)}%"></i></div><span class="pc">${(frac * 100).toFixed(1)}%</span></div>`;
+  let big, sub;
+  if (r.ahead > 0.5) {
+    big = `${soonerLabel(r.months)} ahead`;
+    sub = `You owe ${lakh(r.ahead)} less than the bank's schedule. It says debt-free ${fmtMonth(r.bankFree)}; you're on course for ${fmtMonth(s.freedom)}.`;
+  } else if (r.ahead < -0.5) {
+    big = `${lakh(-r.ahead)} behind`;
+    sub = 'Behind the bank\'s schedule. Check your history for a mistake, or sync your balance with the bank.';
+  } else {
+    big = 'Neck and neck';
+    sub = `Paying only the EMI keeps you level with the bank. Your first extra payment puts you ahead, and it stays ahead for good.`;
+  }
+  return `<div class="section-title"><span>Race the bank</span><span>vs its EMI-only schedule</span></div>
+    <section class="panel pad race">
+      <div class="tg-big">${big}</div>
+      <p class="race-sub">${sub}</p>
+      ${lane('You', r.youRepaid, 'you')}
+      ${lane('Bank', r.bankRepaid, 'bank')}
+      <div class="race-scale"><span>0%</span><span>${top === 100 ? 'Free' : top + '% repaid'}</span></div>
+    </section>`;
+}
+
+// Your best moments so far
+function recordsPanel() {
+  const r = loanRecords(), rows = [];
+  if (r.biggest) rows.push(kv('Biggest extra payment', inr(r.biggest.amount), fmtDay(r.biggest.date)));
+  if (r.bestMonth) rows.push(kv('Best month', inr(r.bestMonth[1]), `${ymLabel(r.bestMonth[0])} · extra payments`));
+  if (r.streak.best) rows.push(kv('Targets hit in a row', `${r.streak.cur} month${r.streak.cur === 1 ? '' : 's'}`, `best ${r.streak.best}`));
+  if (r.bestRate) rows.push(kv('Best exchange rate', `₹${(r.bestRate.inr / r.bestRate.amount).toFixed(2)} per £1`, fmtDay(r.bestRate.date)));
+  if (!rows.length) return '';
+  return `<div class="section-title"><span>Personal records</span></div><section class="panel">${rows.join('')}</section>`;
 }
 
 // What your extra payments have bought back, in days and in things from your own life

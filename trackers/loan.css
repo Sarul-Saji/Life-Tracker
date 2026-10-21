@@ -1,4 +1,4 @@
-/* COMPOUND · trackers/loan.css — styles used only by the loan tracker: payoff plan, monthly target, road to freedom, bought back. */
+/* COMPOUND · trackers/loan.css — styles used only by the loan tracker: payoff plan, monthly target, road to freedom, bought back, race the bank. */
 
 /* Plan slider */
 .plan-amount { font: 400 38px/1 var(--serif); margin: 10px 0 2px; }
@@ -49,3 +49,15 @@ input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border: 0; bord
 .eq span { display: block; font-size: 12.5px; line-height: 1.35; color: var(--muted); margin-top: 2px; }
 .eq:first-child:nth-last-child(odd) { grid-column: 1 / -1; }
 .bought .hint { padding-bottom: 0; }
+
+/* Race the bank */
+.race-sub { font-size: 14px; line-height: 1.5; color: var(--ink2); margin: 8px 0 16px; }
+.lane { display: grid; grid-template-columns: 40px 1fr 46px; align-items: center; gap: 10px; margin-top: 10px; font-size: 13px; }
+.lane .who { color: var(--muted); }
+.lane .pc { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink2); }
+.lane .track { height: 10px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.lane .track i { display: block; height: 100%; min-width: 4px; border-radius: 99px; transition: width 1.1s cubic-bezier(.2, .7, .2, 1); }
+.lane.you .track i { background: var(--accent); }
+.lane.you .who { color: var(--ink); font-weight: 600; }
+.lane.bank .track i { background: var(--muted); }
+.race-scale { display: flex; justify-content: space-between; margin: 6px 46px 0 50px; font-size: 11px; color: var(--muted); }
