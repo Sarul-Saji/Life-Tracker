@@ -127,6 +127,7 @@ let view = 'home';
 let animateNext = true;
 let showAllMilestones = false;
 let moneyMonth = ymNow();
+let showAllTx = false;
 
 function load() {
   try { state = JSON.parse(localStorage.getItem(STORE_KEY)); } catch { state = null; }
@@ -683,19 +684,30 @@ function activityGrid(act) {
   return `<div class="grid-act" style="grid-template-columns:repeat(${weeks},1fr)">${cells}</div>`;
 }
 
+function questRow(q) {
+  const meta = q.done ? 'Completed'
+    : q.limit ? (!q.valid ? 'Log 3+ expenses to qualify' : q.ok ? 'On track until Sunday' : 'Over the limit')
+    : '';
+  return `<div class="quest ${q.done ? 'done' : ''}">
+    <div class="q-top"><div class="c">${q.done ? icon('tick') : ''}</div><div class="q-text">${q.text}</div><div class="q-xp">+${QUEST_XP} XP</div></div>
+    <div class="bar ${q.limit && q.val > q.limit ? 'warn' : ''}"><i style="width:${q.pct * 100}%"></i></div>
+    <div class="q-meta"><span>${meta}</span><span>${q.label}</span></div>
+  </div>`;
+}
+
 function questsCard(ws) {
-  const rows = ws.list.map(q => {
-    const meta = q.done ? 'Completed'
-      : q.limit ? (!q.valid ? 'Log 3+ expenses to qualify' : q.ok ? 'On track until Sunday' : 'Over the limit')
-      : '';
-    return `<div class="quest ${q.done ? 'done' : ''}">
-      <div class="q-top"><div class="c">${q.done ? icon('tick') : ''}</div><div class="q-text">${q.text}</div><div class="q-xp">+${QUEST_XP} XP</div></div>
-      <div class="bar ${q.limit && q.val > q.limit ? 'warn' : ''}"><i style="width:${q.pct * 100}%"></i></div>
-      <div class="q-meta"><span>${meta}</span><span>${q.label}</span></div>
-    </div>`;
-  }).join('');
-  return `<section class="panel">${rows}
+  return `<section class="panel">${ws.list.map(questRow).join('')}
     <div class="q-foot"><span>Complete all three</span><b>${ws.chest ? 'Bonus earned' : `+${CHEST_XP} XP bonus`}</b></div></section>`;
+}
+
+// Inside each tracker: just this week's quests that belong to it
+const QUEST_TRACKER = { log5: 'money', tx10: 'money', tx15: 'money', food40: 'money', shop30: 'money', nospend2: 'money', extra1: 'loan' };
+function questStrip(tracker) {
+  const ws = questStatus(weekStart(todayISO()), activity());
+  const list = ws.list.filter(q => QUEST_TRACKER[q.id] === tracker);
+  if (!list.length) return '';
+  return `<div class="section-title"><span>This week's quest${list.length > 1 ? 's' : ''}</span><span>${ws.done} of 3 done overall</span></div>
+    <section class="panel qstrip">${list.map(questRow).join('')}</section>`;
 }
 
 function moneyCard() {
@@ -737,7 +749,6 @@ function moneyView() {
   const due = isNow ? dueRecurring() : [];
   const base = Math.max(m.income, m.out) || 1;
   const seg = (v, cls) => (v > 0 ? `<i class="${cls}" style="width:${(v / base) * 100}%"></i>` : '');
-  const cats = Object.entries(m.byCat).sort((a, b) => b[1] - a[1]);
   const trend = [-5, -4, -3, -2, -1, 0].map(i => monthStats(ymAdd(ym, i)));
   const maxT = Math.max(1, ...trend.flatMap(t => [t.income, t.out]));
   const monthTx = state.money.tx.filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
@@ -746,9 +757,11 @@ function moneyView() {
   const canClose = ym < ymNow() && m.txCount && !closed;
   const budgets = budgetStatus(ym), treat = treatBalance();
 
+  // Transactions: today only by default (this month); the full month is one tap away
+  const todayOnly = isNow && !showAllTx;
   let lastDay = '', txHtml = '';
-  for (const t of monthTx) {
-    if (t.date !== lastDay) { txHtml += `<div class="day-head">${fmtDayShort(t.date)}</div>`; lastDay = t.date; }
+  for (const t of todayOnly ? monthTx.filter(x => x.date === today) : monthTx) {
+    if (!todayOnly && t.date !== lastDay) { txHtml += `<div class="day-head">${fmtDayShort(t.date)}</div>`; lastDay = t.date; }
     txHtml += txItem(t);
   }
 
@@ -776,6 +789,8 @@ function moneyView() {
       </div>
       ${canNoSpend ? `<button class="small-btn" data-act="nospend">${icon('leaf')} Mark today as a no-spend day · +${TX_XP.nospend} XP</button>` : ''}
     </section>
+
+    ${isNow ? questStrip('money') : ''}
 
     <div class="section-title"><span>Put to work</span><span>${closed ? 'Final grade' : isNow ? 'Grade so far' : 'Projected grade'}</span></div>
     <section class="panel pad">
@@ -810,10 +825,7 @@ function moneyView() {
 
     ${isNow ? habitsCard() : ''}
 
-    ${mixCard(m)}
-
-    <div class="section-title"><span>Where it went</span><span>vs ${ymLabel(prev.ym, { month: 'short' })}</span></div>
-    <section class="panel">${cats.length ? cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, cats[0][1], m.living)).join('') : '<p class="empty">No spending logged this month.</p>'}</section>
+    ${mixCard(m, prev)}
 
     <div class="section-title"><span>Six months</span><span class="key"><i class="sw in"></i>In <i class="sw out"></i>Out</span></div>
     <section class="panel pad">
@@ -822,8 +834,9 @@ function moneyView() {
         <span class="lbl">${ymLabel(t.ym, { month: 'short' })}</span></button>`).join('')}</div>
     </section>
 
-    <div class="section-title"><span>Transactions</span><span>${monthTx.length || ''}</span></div>
-    <section class="panel">${txHtml || '<p class="empty">Nothing logged this month yet.</p>'}</section>
+    <div class="section-title"><span>Transactions</span><span>${todayOnly ? 'Today' : `${monthTx.length} this month`}</span></div>
+    <section class="panel tx-box">${txHtml || `<p class="empty">${todayOnly ? 'Nothing logged today yet.' : 'Nothing logged this month yet.'}</p>`}</section>
+    ${isNow && monthTx.length ? `<button class="more" data-act="tx-all">${todayOnly ? `Show all ${monthTx.length} this month` : 'Show today only'}</button>` : ''}
 
     <div class="section-title"><span>Recurring</span></div>
     <section class="panel">${state.money.recurring.length ? state.money.recurring.map(recItem).join('') : '<p class="empty">Tick "Repeat every month" when logging rent, salary or subscriptions, and they will show up here.</p>'}</section>
@@ -872,41 +885,48 @@ const GROUPS = [
 ];
 const groupOf = catId => GROUPS.find(g => g.cats.includes(catId)) || GROUPS[3];
 const pctOf = (v, total) => { const p = (v / total) * 100; return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`; };
-const MIX_HINT = 'Tap a colour or a row for details';
+const MIX_HINT = 'Tap a colour or a group to see what\'s inside';
+let openGroup = '';   // which group is expanded in "Where it went"
 
-function mixCard(m) {
-  if (!m.living) return '';
+// "Where it went": the mix bar for the big picture, and each group opens up to show its categories
+function mixCard(m, prev) {
+  const head = `<div class="section-title"><span>Where it went</span><span>${m.living ? `${gbp(m.living)} spent` : ''}</span></div>`;
+  if (!m.living) return `${head}<section class="panel"><p class="empty">No spending logged this month.</p></section>`;
   const groups = GROUPS.map((g, i) => {
     const cats = Object.entries(m.byCat).filter(([id]) => groupOf(id) === g).sort((a, b) => b[1] - a[1]);
-    const total = sum(cats, c => c[1]);
-    return { ...g, slot: i + 1, total, cats, cap: `<b>${g.name}</b> · ${pctOf(total, m.living)} of living costs · ${gbp(total)}` };
+    const total = sum(cats, c => c[1]), last = sum(Object.entries(prev.byCat).filter(([id]) => groupOf(id) === g), c => c[1]);
+    return { ...g, slot: i + 1, total, last, cats, cap: `<b>${g.name}</b> · ${pctOf(total, m.living)} of spending · ${gbp(total)}` };
   }).filter(g => g.total > 0);
+  if (!groups.some(g => g.id === openGroup)) openGroup = '';
+  const dim = g => (openGroup && g.id !== openGroup ? 'dim' : '');
+  const change = (v, last) => !last ? 'new this month' : Math.abs(v - last) < 0.5 ? 'same as last month' : `${v > last ? '↑' : '↓'} ${gbp(Math.abs(v - last))} vs last month`;
   const bar = groups.map(g =>
-    `<button class="seg" style="flex:${g.total} 1 0;background:var(--s${g.slot})" data-act="mix" data-g="${g.id}" data-cap="${esc(g.cap)}" aria-label="${g.name}, ${pctOf(g.total, m.living)}, ${gbp(g.total)}"></button>`).join('');
-  const legend = [...groups].sort((a, b) => b.total - a.total).map(g => `
-    <button class="mix-row" data-act="mix" data-g="${g.id}" data-cap="${esc(g.cap)}">
+    `<button class="seg ${dim(g)}" style="flex:${g.total} 1 0;background:var(--s${g.slot})" data-act="mix" data-g="${g.id}" data-cap="${esc(g.cap)}" aria-label="${g.name}, ${pctOf(g.total, m.living)}, ${gbp(g.total)}"></button>`).join('');
+  const rows = [...groups].sort((a, b) => b.total - a.total).map(g => {
+    const open = g.id === openGroup;
+    return `<button class="mix-row ${dim(g)} ${open ? 'open' : ''}" data-act="mix" data-g="${g.id}" data-cap="${esc(g.cap)}" aria-expanded="${open}">
       <i class="sw" style="background:var(--s${g.slot})"></i>
       <div class="main">
         <div class="n"><span>${g.name}</span><b>${pctOf(g.total, m.living)}</b></div>
-        <div class="d">${gbp(g.total)} · ${g.cats.map(([id, v]) => `${catOf(id).name} ${gbp(v)}`).join(' · ')}</div>
+        <div class="d">${gbp(g.total)} · ${change(g.total, g.last)}</div>
       </div>
-    </button>`).join('');
-  return `<div class="section-title"><span>Spending mix</span><span>${gbp(m.living)} living costs</span></div>
-    <section class="panel pad mix" id="mix">
+      <span class="chev">${icon('chevR')}</span>
+    </button>
+    ${open ? `<div class="mix-cats">${g.cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, g.cats[0][1], m.living)).join('')}</div>` : ''}`;
+  }).join('');
+  const active = groups.find(g => g.id === openGroup);
+  return `${head}
+    <section class="panel pad mix" id="mix" data-active="${openGroup}">
       <div class="mix-bar">${bar}</div>
-      <div class="mix-cap" id="mix-cap">${MIX_HINT}</div>
-      ${legend}
+      <div class="mix-cap" id="mix-cap">${active ? active.cap : MIX_HINT}</div>
+      ${rows}
     </section>`;
 }
 
-// Highlight one group in the spending mix (tap again to clear)
+// Open one group in "Where it went" (tap again to close)
 function focusMix(groupId) {
-  const box = $('#mix');
-  if (!box) return;
-  const on = box.dataset.active === groupId ? '' : groupId;
-  box.dataset.active = on;
-  box.querySelectorAll('[data-g]').forEach(x => x.classList.toggle('dim', !!on && x.dataset.g !== on));
-  $('#mix-cap').innerHTML = on ? box.querySelector(`.mix-row[data-g="${on}"]`).dataset.cap : MIX_HINT;
+  openGroup = openGroup === groupId ? '' : groupId;
+  render();
 }
 
 function catRow(id, v, last, max, total) {
@@ -970,6 +990,8 @@ function loanView() {
         <button class="btn btn-primary" data-act="extra">Pay extra</button>
       </div>
     </section>
+
+    ${questStrip('loan')}
 
     <div class="section-title"><span>Overview</span></div>
     <section class="panel">
@@ -1578,6 +1600,7 @@ function act(a, el) {
       return finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>${c.treat ? ` · <b>${gbp(c.treat)}</b> added to your treat fund` : ''}`, { big: true });
     }
     case 'mix': return focusMix(d.g);
+    case 'tx-all': showAllTx = !showAllTx; render(); return;
     case 'xp-help': return xpSheet();
     case 'budget-new': return budgetSheet();
     case 'budget-edit': return budgetSheet(d.id);

@@ -452,6 +452,23 @@ button.cat-row { width: 100%; text-align: left; }
 .mix-row .n b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .mix-row .d { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .mix .dim { opacity: .3; }
+.mix-row { align-items: center; }
+.mix-row .sw { margin: 0; align-self: flex-start; margin-top: 6px; }
+.mix-row .chev { color: var(--muted); transition: transform .2s; display: grid; }
+.mix-row .chev svg { width: 16px; height: 16px; }
+.mix-row.open .chev { transform: rotate(90deg); }
+.mix-cats { margin: 0 0 6px 22px; padding-left: 12px; border-left: 2px solid var(--line); }
+.mix-cats .cat-row { padding: 10px 0; }
+.mix-cats .cat-row .mark { width: 32px; height: 32px; }
+.mix-cats .cat-row .mark svg { width: 15px; height: 15px; }
+
+/* Transactions box: compact and scrollable */
+.tx-box { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; }
+.tx-box .hist { padding: 10px 0; gap: 12px; }
+.tx-box .hist .mark { width: 32px; height: 32px; }
+.tx-box .hist .mark svg { width: 15px; height: 15px; }
+.tx-box .hist .t { font-size: 14px; }
+.tx-box .day-head { position: sticky; top: 0; background: var(--surface); padding: 10px 0 4px; z-index: 1; }
 
 /* Habits card */
 .habit { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
