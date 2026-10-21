@@ -292,10 +292,15 @@ input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border: 0; bord
 .mom .mult small { display: block; font: 500 10.5px var(--sans); letter-spacing: .12em; color: var(--muted); margin-top: 2px; }
 .grid-act { display: grid; grid-template-rows: repeat(7, auto); grid-auto-flow: column; gap: 3px; margin-top: 18px; }
 .grid-act i { display: block; aspect-ratio: 1; border-radius: 3px; background: var(--line); }
-.grid-act i.l1 { background: color-mix(in srgb, var(--ink) 22%, var(--line)); }
-.grid-act i.l2 { background: color-mix(in srgb, var(--ink) 45%, var(--line)); }
-.grid-act i.l3 { background: color-mix(in srgb, var(--ink) 70%, var(--line)); }
-.grid-act i.l4 { background: var(--ink); }
+/* Activity colour: one blue ramp, light → dark = more XP that day */
+:root { --a1: #86b6ef; --a2: #3987e5; --a3: #1c5cab; --a4: #0d366b; }
+@media (prefers-color-scheme: dark) { :root { --a1: #184f95; --a2: #256abf; --a3: #3987e5; --a4: #86b6ef; } }
+.grid-act i.l1 { background: var(--a1); }
+.grid-act i.l2 { background: var(--a2); }
+.grid-act i.l3 { background: var(--a3); }
+.grid-act i.l4 { background: var(--a4); }
+.mom .flame.lit { background: #eb6834; color: #fff; }
+.panel .quest .bar > i { background: var(--a2); }
 .grid-act i.f { background: transparent; }
 .grid-act i.t { box-shadow: 0 0 0 1.5px var(--gold); }
 .grid-legend { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--muted); margin-top: 8px; }
