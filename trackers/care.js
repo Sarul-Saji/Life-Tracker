@@ -181,11 +181,10 @@ function careLockView() {
     <section class="care-lock">
       <div class="care-lock-mark">${careIcon('lock')}</div>
       <h1 class="page-title">Locked</h1>
-      <p class="page-lead">Enter your PIN to open Care.</p>
+      <p class="page-lead">Enter your PIN to open Care. It opens as soon as the PIN is right.</p>
       <form id="f-cpin">
         <label class="field"><span>PIN</span><input name="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" class="care-pin"></label>
         <div id="c-err" class="err"></div>
-        <button class="btn btn-primary btn-block">Unlock</button>
       </form>
       <button class="btn btn-text btn-block" data-act="c-forgot">Forgot your PIN?</button>
     </section>
@@ -354,6 +353,23 @@ function careFinishSetup() {
 
 const carePinOk = pin => /^\d{4,8}$/.test(pin);
 
+// Unlocks as soon as the typed PIN is right; says it doesn't match once it's as long as the real PIN.
+// (PINs set before pinLen existed learn their length on the first successful unlock.)
+function careTryPin(input, submitted = false) {
+  const s = C().settings, pin = input.value.replace(/\D/g, '');
+  if (pin.length >= 4 && careHash(pin) === s.pin) {
+    if (s.pinLen !== pin.length) { s.pinLen = pin.length; save(); }
+    careUnlocked = true;
+    sfx.soft();
+    return render();
+  }
+  if (submitted || pin.length >= (s.pinLen || 8)) {
+    input.value = '';
+    $('#c-err').textContent = "That PIN doesn't match.";
+    haptic([30, 40, 30]);
+  } else if (pin) $('#c-err').textContent = '';
+}
+
 const careForms = {
   'f-csetup'(f) {
     const name = f.elements.name.value.trim(), now = f.elements.now.value, pinOn = f.elements.pinOn.checked, pin = f.elements.pin.value.trim();
@@ -369,7 +385,7 @@ const careForms = {
     if (pinOn && !carePinOk(pin)) return err('Choose a PIN of 4 to 8 digits, or untick the PIN option.');
     state.care = {
       createdAt: todayISO(), name,
-      settings: { cycle: 28, periodLen: 5, pinOn, pin: pinOn ? careHash(pin) : null },
+      settings: { cycle: 28, periodLen: 5, pinOn, pin: pinOn ? careHash(pin) : null, pinLen: pinOn ? pin.length : null },
       periods: start ? [{ id: uid(), start }] : [], pms: [], checks: [],
     };
     careUnlocked = true;
@@ -378,15 +394,7 @@ const careForms = {
     toast(pinOn ? 'Care is ready. It locks again whenever you leave the app.' : 'Care is ready.');
   },
 
-  'f-cpin'(f) {
-    if (careHash(f.elements.pin.value.trim()) !== C().settings.pin) {
-      f.elements.pin.value = '';
-      return ($('#c-err').textContent = "That PIN doesn't match.");
-    }
-    careUnlocked = true;
-    sfx.soft();
-    render();
-  },
+  'f-cpin'(f) { careTryPin(f.elements.pin, true); },
 
   'f-cperiod'(f) {
     const date = f.elements.date.value || todayISO(), c = C();
@@ -412,7 +420,7 @@ const careForms = {
     if (pinOn && !pin && !c.settings.pin) return err('Choose a PIN to turn it on.');
     c.name = name;
     Object.assign(c.settings, { cycle, periodLen: Number(f.elements.plen.value) || 5, pinOn });
-    if (pin) c.settings.pin = careHash(pin);
+    if (pin) Object.assign(c.settings, { pin: careHash(pin), pinLen: pin.length });
     save();
     closeSheet();
     render();
@@ -428,7 +436,7 @@ registerTracker({
 
   migrate(s) {
     if (!s.care) return;
-    s.care.settings = Object.assign({ cycle: 28, periodLen: 5, pinOn: false, pin: null }, s.care.settings);
+    s.care.settings = Object.assign({ cycle: 28, periodLen: 5, pinOn: false, pin: null, pinLen: null }, s.care.settings);
     ['periods', 'pms', 'checks'].forEach(k => { s.care[k] = s.care[k] || []; });
   },
 
@@ -502,6 +510,9 @@ registerTracker({
     if (ev.target.name === 'now') f.querySelectorAll('.care-q').forEach(q => { q.hidden = q.dataset.for !== ev.target.value; });
     if (ev.target.name === 'pinOn') f.querySelector('.care-pinfield').hidden = !ev.target.checked;
   },
+  onInput(ev) { if (ev.target.closest('#f-cpin')) careTryPin(ev.target); },
+  // The lock screen opens the number keypad straight away
+  onRender() { if (view === 'care' && careLocked()) $('#f-cpin .care-pin')?.focus(); },
   // Leaving the app locks Care again
   onResume() { if (careUnlocked && C()?.settings.pinOn) { careUnlocked = false; render(); } },
 });
