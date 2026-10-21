@@ -19,7 +19,11 @@ const GOALS = { lose: { name: 'Lose fat', adj: -500 }, recomp: { name: 'Lose fat
 const isDeficitGoal = () => ['lose', 'recomp'].includes(H().profile.goal);
 const CAL_QUEST_FROM = '2026-10-19';   // the calorie quest slot starts this week, so past weeks stay as they were
 const WATER_GOAL = 8;
-const H_XP = { food: 10, water: 3, gym: 60, weights: 15 };
+const H_XP = { food: 10, water: 3, gym: 60, weights: 15, supp: 5 };
+// Starting list; edit it in the app. One tick per supplement per day, so a second dose needs a deliberate confirm.
+const DEFAULT_SUPPS = [{ id: 's-vitd', name: 'Vitamin D' }, { id: 's-b12', name: 'Vitamin B12' }, { id: 's-zinc', name: 'Zinc' }, { id: 's-mag', name: 'Magnesium' }, { id: 's-iron', name: 'Iron' }];
+const suppLog = () => (state.health?.supps?.log || []);
+const suppTaken = (id, date) => suppLog().filter(x => x.suppId === id && x.date === date);
 const SHIFT_GYM_BONUS = 40;   // extra XP for training on a shift day
 const H = () => state.health;
 
@@ -67,7 +71,17 @@ function calStreak() {
   return n;
 }
 
-const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0, defDays: 0, defBest: 0 };
+// Full days: every supplement on your current list taken that day
+function suppStats() {
+  const list = H().supps?.list || [];
+  if (!list.length) return { suppFull: 0, suppBest: 0 };
+  const days = [...new Set(suppLog().map(x => x.date))].sort().filter(d => list.every(s => suppTaken(s.id, d).length));
+  let best = 0, run = 0, prev = null;
+  for (const d of days) { run = prev && addDays(prev, 1) === d ? run + 1 : 1; best = Math.max(best, run); prev = d; }
+  return { suppFull: days.length, suppBest: best };
+}
+
+const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0, defDays: 0, defBest: 0, suppFull: 0, suppBest: 0 };
 function healthStats() {
   const h = H();
   if (!h) return ZERO_HEALTH;
@@ -94,6 +108,7 @@ function healthStats() {
     doubles: new Set(h.gym.filter(s => dayType(s.date) === 'shift').map(s => s.date)).size,
     weighs: weighIns().length,
     weighWeeks: new Set(weighIns().map(w => weekStart(w.date))).size,
+    ...suppStats(),
     defDays: defWins.length, defBest,
   };
 }
@@ -221,6 +236,8 @@ function healthView() {
       <button class="meal add" data-act="meal-other">${icon('plus')}<b>Something else</b></button>
     </div>
     ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
+
+    ${suppSection()}
 
     ${questStrip('health')}
 
@@ -436,6 +453,66 @@ function updateGymPreview() {
     + kv('Reward', `+${award(H_XP.gym + (onShift ? SHIFT_GYM_BONUS : 0)).xp} XP`, onShift ? `includes +${SHIFT_GYM_BONUS} shift-day bonus` : '');
 }
 
+// Each supplement: today's tick, this week's taken/skipped days (tap a past day to fix it), and the last 7 days
+function suppSection() {
+  const list = H().supps.list, today = todayISO(), wk = weekStart(today), days = [...Array(7)].map((_, i) => addDays(wk, i));
+  const narrow = dt => parseISO(dt).toLocaleDateString('en-GB', { weekday: 'narrow' });
+  const done = list.filter(s => suppTaken(s.id, today).length).length;
+  const rows = list.map(s => {
+    const on = suppTaken(s.id, today).length > 0;
+    const last7 = [...Array(7)].map((_, i) => addDays(today, -i)).filter(d => suppTaken(s.id, d).length).length;
+    return `<div class="supp-row">
+      <button class="supp-tick ${on ? 'on' : ''}" data-act="supp" data-id="${s.id}" aria-pressed="${on}" aria-label="${esc(s.name)}: ${on ? 'taken today' : 'not taken today'}">${icon('tick')}</button>
+      <div class="supp-main">
+        <div class="supp-name"><b>${esc(s.name)}</b><span>${last7} of last 7 days</span></div>
+        <div class="supp-week">${days.map(d => `<button class="sd ${suppTaken(s.id, d).length ? 'on' : ''} ${d === today ? 'today' : ''}" data-act="supp-day" data-id="${s.id}" data-day="${d}" ${d > today ? 'disabled' : ''}
+          aria-label="${esc(s.name)}, ${fmtDayShort(d)}: ${suppTaken(s.id, d).length ? 'taken' : 'not taken'}">${narrow(d)}</button>`).join('')}</div>
+      </div>
+    </div>`;
+  }).join('');
+  return `<div class="section-title"><span>Supplements</span><span>${list.length ? `${done} of ${list.length} today` : ''}</span></div>
+    <section class="panel supps">
+      ${rows || '<p class="empty">No supplements on your list.</p>'}
+      <button class="small-btn supp-edit" data-act="supp-edit">${icon('plus')}Edit list</button>
+    </section>`;
+}
+
+function takeSupp(s, date = todayISO()) {
+  // Ticking a past day fixes the record but earns no XP, so XP stays tied to taking it on the day
+  const g0 = globalStats(), { xp, mult } = date === todayISO() ? award(H_XP.supp) : { xp: 0, mult: 1 };
+  const e = { id: uid(), suppId: s.id, date, ts: Date.now(), xp, mult };
+  H().supps.log.push(e);
+  save();
+  render();
+  finishAction(g0, `${esc(s.name)} · ${date === todayISO() ? 'taken today' : `ticked for ${fmtDayShort(date)}`}${xp ? ` · <b>${xpLabel(e)}</b>` : ''}`);
+}
+const untickSupp = (id, date) => { H().supps.log = H().supps.log.filter(x => !(x.suppId === id && x.date === date)); save(); render(); };
+
+// Already taken today: say when, and offer only an untick, never a second dose
+function suppAgainSheet(s) {
+  const at = new Date(suppTaken(s.id, todayISO())[0].ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  openSheet(`
+    <h2>Already taken today</h2>
+    <p class="lead">You ticked ${esc(s.name)} at ${at}. One a day is the plan, so there's nothing more to take.</p>
+    <div class="sheet-actions">
+      <button class="btn btn-ghost" data-act="supp-undo" data-id="${s.id}">Untick it</button>
+      <button class="btn btn-primary" data-close>Got it</button>
+    </div>`);
+}
+
+function suppEditSheet() {
+  openSheet(`
+    <h2>Your supplements</h2>
+    <p class="lead">Removing one keeps its past days in your history.</p>
+    <div class="panel" style="margin-bottom:18px">${H().supps.list.map(s => `<div class="kv"><span class="k">${esc(s.name)}</span>
+      <button type="button" class="del" data-act="supp-remove" data-id="${s.id}" aria-label="Remove ${esc(s.name)}">${icon('x')}</button></div>`).join('') || '<p class="empty">No supplements yet.</p>'}</div>
+    <form id="f-supp">
+      <label class="field"><span>Add a supplement</span><input name="name" maxlength="30" placeholder="Omega-3"></label>
+      <div id="s-err" class="err"></div>
+      ${sheetButtons('Add')}
+    </form>`);
+}
+
 function weighSheet() {
   const s = weightSeries(), last = s[s.length - 1];
   openSheet(`
@@ -532,7 +609,7 @@ const healthForms = {
   'f-hsetup'(f) {
     const r = readHealthForm(f);
     if (!r) return ($('#h-err').textContent = 'Check your height, weight and age.');
-    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), seeded: DEFAULT_MEALS.map(m => m.id), food: [], gym: [], water: [], weights: [{ id: uid(), date: todayISO(), kg: r.p.weightKg }] };
+    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), seeded: DEFAULT_MEALS.map(m => m.id), food: [], gym: [], water: [], weights: [{ id: uid(), date: todayISO(), kg: r.p.weightKg }], supps: { list: DEFAULT_SUPPS.map(x => ({ ...x })), log: [] } };
     save();
     view = 'health';
     animateNext = true;
@@ -564,6 +641,14 @@ const healthForms = {
     if (f.elements.fav.checked) H().meals.push(m);
     closeSheet();
     logMeal(m);
+  },
+
+  'f-supp'(f) {
+    const name = f.elements.name.value.trim();
+    if (!name) return ($('#s-err').textContent = 'Name the supplement.');
+    if (H().supps.list.some(s => s.name.toLowerCase() === name.toLowerCase())) return ($('#s-err').textContent = "It's already on your list.");
+    H().supps.list.push({ id: uid(), name });
+    save(); render(); suppEditSheet();
   },
 
   'f-weigh'(f) {
@@ -615,6 +700,8 @@ registerTracker({
     });
     // Older weight entries had no id, so they couldn't be removed from the list
     s.health.weights = (s.health.weights || []).map(w => (w.id ? w : { ...w, id: uid() }));
+    // Supplements arrived later: existing Health users get the starting list once
+    if (!s.health.supps) s.health.supps = { list: DEFAULT_SUPPS.map(x => ({ ...x })), log: [] };
   },
 
   views: { health: healthView, 'health-setup': healthSetupView },
@@ -622,8 +709,8 @@ registerTracker({
   card: healthCard,
   notices: () => (state.health && !dayType(todayISO()) ? [notice('rota-ask', 'Working today? Set it in your rota', 'var(--a2)')] : []),
 
-  activity(add) { if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns()].forEach(x => add(x.ts, x.xp)); },
-  xp: () => (state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns()], x => x.xp) : 0),
+  activity(add) { if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns(), ...suppLog()].forEach(x => add(x.ts, x.xp)); },
+  xp: () => (state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns(), ...suppLog()], x => x.xp) : 0),
   stats: () => ({ Hs: healthStats() }),
 
   quests: {
@@ -674,6 +761,9 @@ registerTracker({
     ms('h-def-1', 'First deficit day', 'Under target, still well fed', 150, g => g.Hs.defDays >= 1),
     ms('h-def-7', 'Seven deficit days in a row', '', 600, g => g.Hs.defBest >= 7),
     ms('h-def-30', 'Thirty deficit days', 'Fat loss on autopilot', 1500, g => g.Hs.defDays >= 30),
+    ms('h-supp-1', 'Full supplement day', 'Every one on your list', 100, g => g.Hs.suppFull >= 1),
+    ms('h-supp-7', 'Supplements, 7 days straight', '', 400, g => g.Hs.suppBest >= 7),
+    ms('h-supp-30', 'Supplements, 30 full days', '', 1000, g => g.Hs.suppFull >= 30),
   ],
 
   xpRows: () => kv('Log a meal', `+${H_XP.food}`) + kv('Glass of water', `+${H_XP.water}`, `up to ${WATER_GOAL} a day`)
@@ -690,6 +780,23 @@ registerTracker({
     },
     water: () => addHealth('water', { date: todayISO() }, e => `Water ${fuelDay(todayISO()).water} of ${WATER_GOAL}${e.xp ? ` · <b>${xpLabel(e)}</b>` : ''}`),
     'gym-log': () => gymSheet(),
+    supp: (el, d) => {
+      const s = H().supps.list.find(x => x.id === d.id);
+      if (!s) return;
+      if (suppTaken(s.id, todayISO()).length) suppAgainSheet(s); else takeSupp(s);
+    },
+    'supp-day': (el, d) => {
+      const s = H().supps.list.find(x => x.id === d.id);
+      if (!s || d.day > todayISO()) return;
+      if (suppTaken(s.id, d.day).length) { untickSupp(s.id, d.day); toast(`${esc(s.name)} unticked for ${fmtDayShort(d.day)}.`); }
+      else takeSupp(s, d.day);
+    },
+    'supp-undo': (el, d) => { closeSheet(); untickSupp(d.id, todayISO()); toast('Unticked for today.'); },
+    'supp-edit': () => suppEditSheet(),
+    'supp-remove': (el, d) => {
+      H().supps.list = H().supps.list.filter(x => x.id !== d.id);
+      save(); render(); suppEditSheet();
+    },
     weigh: () => weighSheet(),
     'w-range': (el, d) => { hWeightRange = Number(d.d); render(); },
     'h-settings': () => healthSettingsSheet(),
