@@ -1,11 +1,12 @@
 {
   "version": "0.0.1",
   "configurations": [
-    {
-      "name": "life-quest",
-      "runtimeExecutable": "powershell",
-      "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1"],
-      "port": 8765
-    }
+    { "name": "life-quest", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8765"], "port": 8765 },
+    { "name": "compound-money", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8766"], "port": 8766 },
+    { "name": "compound-health", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8767"], "port": 8767 },
+    { "name": "compound-care", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8768"], "port": 8768 },
+    { "name": "compound-flow", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8769"], "port": 8769 },
+    { "name": "compound-todo", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8770"], "port": 8770 },
+    { "name": "compound-extra", "runtimeExecutable": "powershell", "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".claude/serve.ps1", "-Port", "8771"], "port": 8771 }
   ]
 }
