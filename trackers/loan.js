@@ -25,7 +25,53 @@ function simulate(balance, extra = 0, loan = state.loan) {
 
 const loanBalance = () => state.loan.setupBalance - sum(state.loan.log, e => e.principal);
 const lastEmiISO = () => state.loan.log.filter(e => e.type === 'emi').reduce((d, e) => (e.date > d ? e.date : d), state.loan.setupDate);
-const ZERO_LOAN = { bal: 0, repaid: 0, emiCount: 0, extraCount: 0, extraPaid: 0, biggest: 0, monthsSaved: 0, interestSaved: 0 };
+const ZERO_LOAN = { bal: 0, repaid: 0, emiCount: 0, extraCount: 0, extraPaid: 0, biggest: 0, monthsSaved: 0, interestSaved: 0, targetHits: 0 };
+
+// Time you can feel: days for small amounts, then months and years
+const DAYS_PER_MONTH = 30.44;
+function soonerLabel(m) {
+  if (!isFinite(m)) return 'never';
+  if (m >= 2) return dur(m);
+  const d = Math.round(m * DAYS_PER_MONTH);
+  return `${d} day${d === 1 ? '' : 's'}`;
+}
+
+// Like simulate(), but stops once the balance drops to goalBal: how many EMIs until a checkpoint
+function monthsToReach(goalBal, extra = 0) {
+  const r = state.loan.rate / 1200, pay = state.loan.emi + extra;
+  let b = Math.max(0, loanBalance()), m = 0;
+  while (b > goalBal + 0.5) {
+    if (pay <= b * r || m > 1200) return Infinity;
+    b -= pay - b * r;
+    m++;
+  }
+  return m;
+}
+
+/* ---------- Monthly target ----------
+   An extra-payment goal for each month, on top of the EMI. Hitting it is recorded once per month
+   (with the target at that moment), so changing the target later never takes back earned XP. */
+const TARGET_XP = 250;
+let loanTargetHit = null;   // set when the payment just logged hit its month's target
+const extrasIn = ym => sum(state.loan.log.filter(e => e.type === 'extra' && e.date.slice(0, 7) === ym), e => e.amount);
+
+function checkTargetHit(ym) {
+  const L = state.loan, paid = extrasIn(ym);
+  L.targetHits ||= {};
+  const hit = L.targetHits[ym];
+  if (hit) { if (paid < hit.target) delete L.targetHits[ym]; return null; }   // a payment was removed
+  // Only this month or last (for a late-logged transfer) can be hit, so old payments can't earn it retroactively
+  if (!(L.target > 0) || paid < L.target || ym < ymAdd(ymNow(), -1)) return null;
+  L.targetHits[ym] = { target: L.target, xp: TARGET_XP, ts: Date.now() };
+  return { ym, ...L.targetHits[ym] };
+}
+const recheckTargetHits = () => Object.keys(state.loan?.targetHits || {}).forEach(ym => checkTargetHit(ym));
+
+function targetHitNote() {
+  const h = loanTargetHit;
+  loanTargetHit = null;
+  return h ? ` · <b>${ymLabel(h.ym, { month: 'long' })} target hit +${h.xp} XP</b>` : '';
+}
 
 function loanStats() {
   const L = state.loan;
@@ -49,6 +95,7 @@ function loanStats() {
     nextEmi: addMonths(last, 1),
     freedom: bal <= 0 ? last : addMonths(last, Math.ceil(proj.months)),
     originalEnd: addMonths(parseISO(L.setupDate), Math.ceil(L.baselineMonths)),
+    targetHits: Object.keys(L.targetHits || {}).length,
   };
   s.emiDue = bal > 0 && new Date() >= s.nextEmi;
   return s;
@@ -57,6 +104,7 @@ function loanStats() {
 // Creates a loan entry (EMI or extra) and pushes it to the log.
 // auto = logged by the app itself (the monthly EMI), so it earns XP but doesn't count as you showing up.
 function makeLoanEntry(type, amount, date, { auto = false } = {}) {
+  loanTargetHit = null;
   const bal = Math.max(0, loanBalance());
   const e = { id: uid(), ts: Date.now(), type, date, amount };
   if (auto) e.auto = true;
@@ -77,6 +125,7 @@ function makeLoanEntry(type, amount, date, { auto = false } = {}) {
   e.xp = a.xp;
   e.mult = a.mult;
   state.loan.log.push(e);
+  if (type === 'extra') loanTargetHit = checkTargetHit(date.slice(0, 7));
   return e;
 }
 
@@ -139,11 +188,13 @@ function loanView() {
 
     ${questStrip('loan')}
 
+    ${targetPanel(s)}
+    ${roadPanel(s)}
+    ${boughtPanel(s)}
+
     <div class="section-title"><span>Overview</span></div>
     <section class="panel">
       ${kv('Debt-free by', fmtMonth(s.freedom), `originally ${fmtMonth(s.originalEnd)}`)}
-      ${kv('Time saved', s.monthsSaved < 0.05 ? '—' : dur(s.monthsSaved), '', 'pos')}
-      ${kv('Interest saved', s.interestSaved < 1 ? '—' : lakh(s.interestSaved), '', 'pos')}
       ${kv('Interest this month', inr(s.interestNow), 'goes to the bank', 'neg')}
       ${kv('Extra paid', lakh(s.extraPaid), `${s.extraCount} payment${s.extraCount === 1 ? '' : 's'}`)}
       ${kv('Next EMI', fmtDay(s.nextEmi), `${s.emiCount} logged`)}
@@ -171,6 +222,104 @@ function loanView() {
   </div>`;
 }
 
+// This month's extra-payment target: progress, what's left, and a one-tap way to send it
+function targetPanel(s) {
+  if (s.bal <= 0) return '';
+  const L = state.loan, ym = ymNow(), t = L.target || 0;
+  const head = `<div class="section-title"><span>${ymLabel(ym, { month: 'long' })} target</span><span>${t ? 'extra, on top of the EMI' : ''}</span></div>`;
+  if (!t) return `${head}<section class="panel pad target">
+      <p class="tg-note">Pick an amount to pay extra every month. Hitting it earns <b>+${TARGET_XP} XP</b> and pulls every date on your road to freedom closer.</p>
+      <button class="btn btn-ghost btn-block" data-act="target">Set a monthly target</button>
+    </section>`;
+  const paid = extrasIn(ym), left = Math.max(0, t - paid), met = paid >= t, rate = latestRate(), hit = L.targetHits?.[ym];
+  const daysLeft = parseISO(ymLastDay(ym)).getDate() - new Date().getDate() + 1;
+  const send = rate ? Math.ceil(left / rate) : '';
+  const note = met
+    ? `Target hit${hit ? ` · <b>+${hit.xp} XP</b>` : ''}. Anything more this month is a bonus.`
+    : `<b>${inr(left)}</b> to go${rate ? `, about ${gbp(send)}` : ''} · ${daysLeft} day${daysLeft === 1 ? '' : 's'} left`;
+  return `${head}<section class="panel pad target ${met ? 'met' : ''}">
+    <div class="tg-top">
+      <div><div class="tg-big">${inr(paid)}</div><div class="muted small">of ${inr(t)} paid extra</div></div>
+      <button class="btn btn-ghost btn-sm" data-act="target">Edit</button>
+    </div>
+    <div class="bar ${met ? 'gold' : ''}"><i style="width:${Math.min(1, paid / t) * 100}%"></i></div>
+    <p class="tg-note">${note}</p>
+    ${met ? '' : `<button class="btn btn-primary btn-block" data-act="target-send" data-gbp="${send}">Send ${rate ? gbp(send) : 'it'} from the UK</button>`}
+  </section>`;
+}
+
+// Road to freedom: a checkpoint every 5% repaid, each with its date at your current pace
+const checkpointXp = p => (p === 100 ? 10000 : p % 25 === 0 ? 1500 : 400);
+function roadPanel(s) {
+  const L = state.loan, pct = s.repaid * 100, passed = Math.min(20, Math.floor(pct / 5 + 1e-9)), t = L.target || 0;
+  const segs = [...Array(20)].map((_, i) => `<i><b style="width:${Math.min(1, Math.max(0, (pct - i * 5) / 5)) * 100}%"></b></i>`).join('');
+  const last = parseISO(lastEmiISO());
+  const stops = [];
+  for (let p = (passed + 1) * 5; p <= 100 && stops.length < 3; p += 5) {
+    const goal = L.original * (1 - p / 100), m = monthsToReach(goal, t);
+    stops.push({ p, name: p === 100 ? 'Debt-free' : `${p}% repaid`, toGo: s.bal - goal, when: isFinite(m) ? `around ${fmtMonth(addMonths(last, m))}` : 'not at this pace' });
+  }
+  const [next, ...later] = stops;
+  return `<div class="section-title"><span>Road to freedom</span><span>${passed} of 20 checkpoints</span></div>
+    <section class="panel pad road-panel">
+      ${next ? `<div class="muted small">Next checkpoint</div>
+        <div class="tg-big">${next.name}</div>
+        <div class="muted small">${lakh(next.toGo)} to go · ${next.when} · <span class="xp">+${checkpointXp(next.p).toLocaleString('en-IN')} XP</span></div>`
+      : `<div class="tg-big">Debt-free</div><div class="muted small">Every checkpoint passed. You made it.</div>`}
+      <div class="road" role="img" aria-label="${pct.toFixed(1)}% of the loan repaid">${segs}</div>
+      <div class="road-marks"><span>25%</span><span>50%</span><span>75%</span><span>Free</span></div>
+      ${later.map(x => kv(x.name, x.when, `${lakh(x.toGo)} to go · +${checkpointXp(x.p).toLocaleString('en-IN')} XP`)).join('')}
+      ${next ? `<p class="hint">Dates assume your EMI${t ? ` plus your ${inr(t)} monthly target` : ' only. Set a monthly target to pull them closer'}.</p>` : ''}
+    </section>`;
+}
+
+// What your extra payments have bought back, in days and in things from your own life
+function boughtPanel(s) {
+  const L = state.loan, bal = Math.max(0, loanBalance());
+  const days = Math.max(0, Math.round(s.monthsSaved * DAYS_PER_MONTH)), saved = Math.max(0, s.interestSaved);
+  let top, amount = saved;
+  if (saved >= 1) {
+    top = `<div class="bought-top">
+        <div><div class="tg-big">${days.toLocaleString('en-GB')}</div><div class="muted small">day${days === 1 ? '' : 's'} of your life bought back</div></div>
+        <div><div class="tg-big">${lakh(saved)}</div><div class="muted small">interest the bank will never see</div></div>
+      </div>
+      <div class="eq-title">That interest is the same as</div>`;
+  } else {
+    if (bal <= 0) return '';
+    // Nothing yet: show what one payment of your target (or ₹50,000) would do
+    const sample = Math.min(bal, L.target || 50000), now = simulate(bal), after = simulate(bal - sample);
+    amount = now.interest - after.interest;
+    top = `<p class="tg-note">Nothing bought back yet. One extra payment of <b>${inr(sample)}</b> would buy back about <b>${soonerLabel(now.months - after.months)}</b> and save <b>${lakh(amount)}</b> in interest. That's the same as:</p>`;
+  }
+  const rateNote = s.monthsSaved < -0.05
+    ? '<p class="hint">Rate rises since you started tracking have added time to the loan. Extra payments win it back.</p>' : '';
+  return `<div class="section-title"><span>Bought back</span><span>vs paying only the EMI</span></div>
+    <section class="panel pad bought">${top}${lifeEquivalents(amount)}${rateNote}</section>`;
+}
+
+// Rupees turned into your own London life, using what you've actually logged in Money
+function lifeEquivalents(rupees) {
+  const rate = latestRate(), tiles = [];
+  const add = (n, label) => { if (isFinite(n) && n >= 0.1) tiles.push([n >= 10 ? Math.round(n).toLocaleString('en-GB') : n.toFixed(1), label]); };
+  if (rate) tiles.push([gbp(Math.round(rupees / rate)), `in pounds, at ₹${rate.toFixed(2)} per £1`]);
+  add(rupees / state.loan.emi, 'EMIs you never have to pay');
+  if (rate) {
+    // A typical month: the average of the last six full months that had any of it (rent also counts this month)
+    const months = [1, 2, 3, 4, 5, 6].map(i => monthStats(ymAdd(ymNow(), -i)));
+    const typical = (pick, extra = []) => {
+      const vals = [...months, ...extra].map(pick).filter(v => v > 0);
+      return vals.length ? sum(vals, v => v) / vals.length : 0;
+    };
+    const pounds = rupees / rate;
+    const rent = typical(m => m.byCat.rent, [monthStats(ymNow())]), living = typical(m => m.living), food = typical(m => m.byCat.groceries);
+    if (rent) add(pounds / rent, 'months of your rent');
+    if (living) add(pounds / living, 'months of everything you spend in London');
+    if (food) add(pounds / food, 'months of groceries');
+  }
+  const html = tiles.slice(0, 4).map(([n, label]) => `<div class="eq"><b>${n}</b><span>${label}</span></div>`).join('');
+  return `<div class="eq-grid">${html}</div>${rate ? '' : '<p class="hint">Log a transfer in <b>Money → To India</b> and this also shows in pounds and in months of your London life.</p>'}`;
+}
+
 function updatePlan() {
   const range = $('#p-range');
   if (!range || !state?.loan) return;
@@ -185,13 +334,14 @@ function updatePlan() {
     ${kv('Interest still to pay', lakh(plan.interest), '', 'neg')}
     <div class="plan-note">${x > 0
       ? `<b>${dur(base.months - plan.months)}</b> sooner and <b>${lakh(base.interest - plan.interest)}</b> less interest than paying only the EMI.${rate ? ` That's about <b>${gbp(x / rate)}</b> a month from London.` : ''}`
-      : 'Slide to see what a monthly extra payment would do.'}</div>`;
+      : 'Slide to see what a monthly extra payment would do.'}</div>
+    ${x > 0 && x !== (state.loan.target || 0) ? `<button class="btn btn-ghost btn-block plan-set" data-act="plan-target">Make ${inr(x)} my monthly target</button>` : ''}`;
 }
 
 function histItem(e) {
   const m = {
     emi: ['calendar', 'EMI', `${inr(e.interest)} interest · ${inr(e.principal)} principal`],
-    extra: ['bolt', 'Extra payment', `${dur(e.monthsRemoved || 0)} sooner · ${lakh(e.interestSaved || 0)} interest saved`],
+    extra: ['bolt', 'Extra payment', `${soonerLabel(e.monthsRemoved || 0)} sooner · ${lakh(e.interestSaved || 0)} interest saved`],
     sync: ['sync', 'Balance synced', `set to ${inr(e.amount)}`],
   }[e.type];
   return `<div class="hist ${e.type}">
@@ -257,7 +407,7 @@ function updatePreview() {
     out.innerHTML = kv('To interest', inr(i), '', 'neg') + kv('To principal', inr(Math.max(0, a - i)), '', 'pos');
   } else {
     const now = simulate(bal), after = simulate(bal - Math.min(a, bal)), months = now.months - after.months;
-    out.innerHTML = kv('Debt-free', `${dur(months)} sooner`, '', 'pos')
+    out.innerHTML = kv('Debt-free', `${soonerLabel(months)} sooner`, '', 'pos')
       + kv('Interest saved', lakh(now.interest - after.interest), '', 'pos')
       + kv('Reward', `+${award(extraXp(a, months)).xp.toLocaleString('en-IN')} XP`);
   }
@@ -274,6 +424,32 @@ function termsSheet() {
       </div>
       ${sheetButtons('Save')}
     </form>`);
+}
+
+function targetSheet() {
+  const L = state.loan, chips = [25000, 50000, 75000, 100000].map(v => `<button type="button" class="chip" data-act="target-chip" data-amt="${v}">${lakh(v)}</button>`).join('');
+  openSheet(`
+    <h2>Monthly target</h2>
+    <p class="lead">How much you aim to pay off the loan each month, on top of the EMI. Hit it and earn <b>+${TARGET_XP} XP</b>.</p>
+    <form id="f-target">
+      <label class="field"><span>Extra per month (₹)</span><input id="tg-amt" ${moneyAttrs('inr', L.target || state.settings.plan || '')} placeholder="50,000"></label>
+      <div class="chips">${chips}</div>
+      <div class="preview" id="tg-preview"></div>
+      ${sheetButtons('Save target')}
+      ${L.target ? '<button type="button" class="btn btn-text btn-danger btn-block" data-act="target-off">Remove the target</button>' : ''}
+    </form>`);
+  updateTargetPreview();
+}
+
+function updateTargetPreview() {
+  const out = $('#tg-preview');
+  if (!out) return;
+  const x = num($('#tg-amt').value), bal = Math.max(0, loanBalance()), rate = latestRate();
+  if (!x || bal <= 0) { out.innerHTML = ''; return; }
+  const base = simulate(bal), plan = simulate(bal, x);
+  out.innerHTML = kv('Debt-free by', fmtMonth(addMonths(parseISO(lastEmiISO()), Math.ceil(plan.months))), `${soonerLabel(base.months - plan.months)} sooner`, 'pos')
+    + kv('Interest saved', lakh(base.interest - plan.interest), '', 'pos')
+    + (rate ? kv('From London', `about ${gbp(Math.ceil(x / rate))}`, 'a month') : '');
 }
 
 function syncSheet() {
@@ -297,7 +473,7 @@ function logPayment(type, amount, date) {
   if (amt) countTo(amt, before.bal, after.bal);
   if (bar) { bar.style.transition = 'none'; bar.style.width = before.repaid * 100 + '%'; void bar.offsetWidth; bar.style.transition = ''; bar.style.width = after.repaid * 100 + '%'; }
   const msg = type === 'extra'
-    ? `<b>${inr(amount)}</b> paid · ${dur(e.monthsRemoved)} sooner · ${lakh(e.interestSaved)} interest saved · <b>${xpLabel(e)}</b>`
+    ? `<b>${inr(amount)}</b> paid · ${soonerLabel(e.monthsRemoved)} sooner · ${lakh(e.interestSaved)} interest saved · <b>${xpLabel(e)}</b>${targetHitNote()}`
     : `EMI logged · <b>${inr(e.principal)}</b> to principal · <b>${xpLabel(e)}</b>`;
   finishAction(g0, msg, { big: type === 'extra', el: amt });
 }
@@ -306,7 +482,7 @@ const loanForms = {
   'f-loan-setup'(f) {
     const d = Object.fromEntries(new FormData(f));
     const err = msg => { $('#setup-err').textContent = msg; };
-    const loan = { name: d.name.trim() || 'Student loan', original: num(d.original), setupBalance: num(d.balance), rate: num(d.rate), emi: num(d.emi), setupDate: d.date, log: [], autoEmi: true };
+    const loan = { name: d.name.trim() || 'Student loan', original: num(d.original), setupBalance: num(d.balance), rate: num(d.rate), emi: num(d.emi), setupDate: d.date, log: [], autoEmi: true, target: 0, targetHits: {} };
     if (!(loan.original > 0 && loan.setupBalance > 0 && loan.rate > 0 && loan.emi > 0)) return err('Fill in all the numbers.');
     if (loan.setupBalance > loan.original) return err("The balance can't be more than the original loan.");
     const base = simulate(loan.setupBalance, 0, loan);
@@ -352,6 +528,16 @@ const loanForms = {
     toast('Loan terms updated.');
   },
 
+  'f-target'() {
+    const t = num($('#tg-amt').value);
+    if (!t) return $('#tg-amt').focus();
+    state.loan.target = t;
+    save();
+    closeSheet();
+    render();
+    toast(`Monthly target set: <b>${inr(t)}</b> extra. Hit it and earn <b>+${TARGET_XP} XP</b>.`);
+  },
+
   'f-sync'(f) {
     const raw = f.elements.bal.value, real = num(raw);
     if (!raw.trim() || !(real >= 0)) return toast('Enter the balance from your bank app.');
@@ -373,22 +559,33 @@ registerTracker({
 
   migrate(s) {
     if (s.loan && s.loan.autoEmi === undefined) s.loan.autoEmi = true;
+    if (s.loan && s.loan.target === undefined) s.loan.target = 0;
+    if (s.loan && !s.loan.targetHits) s.loan.targetHits = {};
   },
 
   views: { loan: loanView, 'loan-setup': loanSetupView },
   needsData: { loan: () => !!state.loan },
   card: () => loanCard(loanStats()),
   notices() {
-    const ls = loanStats();
-    return ls && ls.emiDue ? [notice('emi', `Your ${fmtMonth(ls.nextEmi)} EMI is ready to log`)] : [];
+    const ls = loanStats(), out = [];
+    if (!ls) return out;
+    if (ls.emiDue) out.push(notice('emi', `Your ${fmtMonth(ls.nextEmi)} EMI is ready to log`));
+    // Last week of the month: a nudge if the target isn't hit yet
+    const ym = ymNow(), t = state.loan.target || 0, left = t - extrasIn(ym);
+    if (ls.bal > 0 && t > 0 && left > 0 && addDays(todayISO(), 7) > ymLastDay(ym))
+      out.push(notice('target-go', `${inr(left)} to go for your ${ymLabel(ym, { month: 'long' })} loan target`, 'var(--gold)'));
+    return out;
   },
   onRender: () => updatePlan(),
   onStart: () => runAutoEmi(),
   onResume: () => runAutoEmi(),
 
   // Auto-logged EMIs earn XP but don't count as you showing up
-  activity(add) { (state.loan?.log || []).forEach(e => { if (!e.auto) add(e.ts, e.xp); }); },
-  xp: () => sum(state.loan?.log || [], e => e.xp),
+  activity(add) {
+    (state.loan?.log || []).forEach(e => { if (!e.auto) add(e.ts, e.xp); });
+    Object.values(state.loan?.targetHits || {}).forEach(h => add(h.ts, h.xp));
+  },
+  xp: () => sum(state.loan?.log || [], e => e.xp) + sum(Object.values(state.loan?.targetHits || {}), h => h.xp),
   stats: () => ({ L: loanStats() || ZERO_LOAN }),
 
   quests: {
@@ -414,15 +611,20 @@ registerTracker({
     ms('time-60', 'Five years sooner', '', 2000, g => g.L.monthsSaved >= 60),
     ms('saved-25l', '₹25 lakh interest saved', '', 3000, g => g.L.interestSaved >= 2.5e6),
     ms('time-120', 'Ten years sooner', 'A decade given back', 4000, g => g.L.monthsSaved >= 120),
+    ms('target-1', 'First monthly target hit', 'You said it, you paid it', 300, g => g.L.targetHits >= 1),
+    ms('target-3', 'Three monthly targets hit', '', 600, g => g.L.targetHits >= 3),
+    ms('target-6', 'Six monthly targets hit', 'Half a year of extra payments', 1000, g => g.L.targetHits >= 6),
+    ms('target-12', 'Twelve monthly targets hit', 'A year of beating the bank', 2000, g => g.L.targetHits >= 12),
     ...[...Array(20)].map((_, i) => {
       const p = (i + 1) * 5;
       return ms('repaid-' + p, p === 100 ? 'Debt-free' : `${p}% of the loan repaid`,
         p === 100 ? 'The loan is gone. You are free.' : p % 25 === 0 ? 'A major milestone' : '',
-        p === 100 ? 10000 : p % 25 === 0 ? 1500 : 400, g => g.L.repaid >= p / 100 - 1e-9);
+        checkpointXp(p), g => g.L.repaid >= p / 100 - 1e-9);
     }),
   ],
 
-  xpRows: () => kv('EMI', `+${XP.emi}`, 'logged automatically each month') + kv('Extra loan payment', '+1 per ₹100', '+50 for every month it cuts'),
+  xpRows: () => kv('EMI', `+${XP.emi}`, 'logged automatically each month') + kv('Extra loan payment', '+1 per ₹100', '+50 for every month it cuts')
+    + kv('Monthly loan target hit', `+${TARGET_XP}`, 'once a month'),
 
   forms: loanForms,
   actions: {
@@ -435,7 +637,22 @@ registerTracker({
       if (!confirm('Remove this entry? Use this to fix a mistake.')) return;
       state.loan.log = state.loan.log.filter(e => e.id !== d.id);
       state.money.tx.forEach(t => { if (t.loanId === d.id) delete t.loanId; });
+      recheckTargetHits();
       save(); render();
+    },
+    target: () => targetSheet(),
+    'target-chip': (el, d) => { $('#tg-amt').value = Number(d.amt).toLocaleString('en-IN'); updateTargetPreview(); },
+    'target-off': () => {
+      state.loan.target = 0;
+      save(); closeSheet(); render();
+      toast('Monthly target removed. XP you already earned stays.');
+    },
+    'target-send': (el, d) => transferSheet(d.gbp, 'extra'),
+    'target-go': () => go('loan'),
+    'plan-target': () => {
+      state.loan.target = Number($('#p-range').value);
+      save(); render();
+      toast(`Monthly target set: <b>${inr(state.loan.target)}</b> extra. Hit it and earn <b>+${TARGET_XP} XP</b>.`);
     },
     'auto-emi': () => {
       state.loan.autoEmi = state.loan.autoEmi === false;
@@ -452,6 +669,7 @@ registerTracker({
   },
   onInput(ev) {
     if (ev.target.id === 'm-amt') updatePreview();
+    if (ev.target.id === 'tg-amt') updateTargetPreview();
     if (ev.target.id === 'p-range') { state.settings.plan = Number(ev.target.value); updatePlan(); }
   },
   onChange(ev) { if (ev.target.id === 'p-range') save(); },

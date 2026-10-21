@@ -1,4 +1,4 @@
-/* COMPOUND · trackers/loan.css — styles used only by the loan tracker (payoff plan slider). */
+/* COMPOUND · trackers/loan.css — styles used only by the loan tracker: payoff plan, monthly target, road to freedom, bought back. */
 
 /* Plan slider */
 .plan-amount { font: 400 38px/1 var(--serif); margin: 10px 0 2px; }
@@ -18,3 +18,34 @@ input[type=range]::-moz-range-thumb { width: 26px; height: 26px; border: 0; bord
 .plan .kv { padding: 11px 0; }
 .plan-note { margin-top: 12px; padding: 14px 16px; border-radius: 14px; background: var(--accent-soft); font-size: 14px; color: var(--ink2); }
 .plan-note b { color: var(--accent); }
+
+/* Monthly target */
+.tg-big { font: 400 34px/1.05 var(--serif); letter-spacing: -.01em; margin: 2px 0; font-variant-numeric: lining-nums tabular-nums; }
+.tg-note { font-size: 14px; line-height: 1.5; color: var(--ink2); margin-top: 12px; }
+.tg-note b { color: var(--ink); font-weight: 600; }
+.target .tg-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.target .btn-block { margin-top: 16px; }
+.target.met .tg-big { color: var(--gold); }
+.plan-set { margin-top: 12px; }
+
+/* Road to freedom: 20 checkpoints, grouped in quarters */
+.road { display: flex; gap: 3px; margin-top: 18px; }
+.road i { flex: 1; height: 8px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.road i:nth-child(5n):not(:last-child) { margin-right: 5px; }
+.road i b { display: block; height: 100%; background: var(--accent); }
+.road-marks { display: grid; grid-template-columns: repeat(4, 1fr); margin: 6px 0 4px; font-size: 11px; color: var(--muted); }
+.road-marks span { text-align: right; }
+.road-panel .xp { color: var(--gold); font-weight: 500; }
+.road-panel .kv { padding: 13px 0; }
+.road-panel .kv:first-of-type { margin-top: 6px; border-top: 1px solid var(--line); }
+.road-panel .hint { padding-bottom: 0; }
+
+/* Bought back */
+.bought-top { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.eq-title { font-size: 13px; color: var(--muted); margin-top: 20px; }
+.eq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.eq { background: var(--bg); border-radius: 14px; padding: 12px 14px; }
+.eq b { display: block; font: 400 26px/1.1 var(--serif); font-variant-numeric: lining-nums; }
+.eq span { display: block; font-size: 12.5px; line-height: 1.35; color: var(--muted); margin-top: 2px; }
+.eq:first-child:nth-last-child(odd) { grid-column: 1 / -1; }
+.bought .hint { padding-bottom: 0; }

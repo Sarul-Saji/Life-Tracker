@@ -217,7 +217,7 @@ function habitsCard() {
   if (state.loan && rate && h.total > 0) {
     const bal = Math.max(0, loanBalance()), base = simulate(bal), plan = simulate(bal, h.total * rate);
     const months = base.months - plan.months;
-    if (months >= 0.1) loanLine = ` Sent to the loan instead, that's <b>${dur(months)}</b> sooner debt-free.`;
+    if (months >= 0.1) loanLine = ` Sent to the loan instead, that's <b>${soonerLabel(months)}</b> sooner debt-free.`;
   }
   return `<div class="section-title"><span>Habits</span><span>Last 30 days</span></div>
     <section class="panel pad habits">
@@ -363,9 +363,9 @@ function txSheet(type, { treat = false } = {}) {
   setTimeout(() => $('#f-tx [name=amount]')?.focus(), 80);
 }
 
-function transferSheet(prefill = '') {
+function transferSheet(prefill = '', purpose = prefill ? 'extra' : 'emi') {
   const purposes = Object.entries(PURPOSES).map(([id, n]) =>
-    `<label class="purpose"><input type="radio" name="purpose" value="${id}" ${(prefill ? id === 'extra' : id === 'emi') ? 'checked' : ''} hidden>${n}</label>`).join('');
+    `<label class="purpose"><input type="radio" name="purpose" value="${id}" ${id === purpose ? 'checked' : ''} hidden>${n}</label>`).join('');
   openSheet(`
     <h2>Transfer to India</h2>
     <p class="lead">What left in pounds, and what arrived in rupees. Your exchange rate is tracked over time.</p>
@@ -392,7 +392,7 @@ function updateTransferPreview() {
   const out = $('#t-preview');
   if (p === 'extra' && state.loan && r) {
     const bal = Math.max(0, loanBalance()), now = simulate(bal), after = simulate(bal - Math.min(r, bal));
-    out.innerHTML = kv('Also logged as', 'Extra loan payment') + kv('Debt-free', `${dur(now.months - after.months)} sooner`, '', 'pos') + kv('Interest saved', lakh(now.interest - after.interest), '', 'pos');
+    out.innerHTML = kv('Also logged as', 'Extra loan payment') + kv('Debt-free', `${soonerLabel(now.months - after.months)} sooner`, '', 'pos') + kv('Interest saved', lakh(now.interest - after.interest), '', 'pos');
   } else if (p === 'emi') out.innerHTML = `<p class="hint">This just moves money home. ${state.loan?.autoEmi === false ? 'Log the EMI itself in the loan tracker when the bank debits it.' : 'The EMI itself is logged automatically on the day the bank debits it.'}</p>`;
   else if (p === 'savings') out.innerHTML = '<p class="hint">Money kept in India. Counts as saved.</p>';
   else if (p === 'family') out.innerHTML = '<p class="hint">Money for family. Counts as spending.</p>';
@@ -529,7 +529,7 @@ const moneyForms = {
       const e = t.loanId && state.loan.log.find(x => x.id === t.loanId);
       if (e && e.ts < t.ts) return `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> · linked to your extra payment · <b>${xpLabel(t)}</b>`;
       return e
-        ? `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> · loan ${dur(e.monthsRemoved)} sooner · <b>+${t.xp + e.xp} XP</b>`
+        ? `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> · loan ${soonerLabel(e.monthsRemoved)} sooner · <b>+${t.xp + e.xp} XP</b>${targetHitNote()}`
         : `<b>${gbp(t.amount)} → ${inr(t.inr)}</b> at ₹${(t.inr / t.amount).toFixed(2)} · <b>${xpLabel(t)}</b>`;
     });
   },
@@ -671,7 +671,7 @@ registerTracker({
       if (!confirm('Remove this entry?')) return;
       const t = state.money.tx.find(x => x.id === d.id);
       state.money.tx = state.money.tx.filter(x => x.id !== d.id);
-      if (t?.loanId && state.loan) state.loan.log = state.loan.log.filter(e => e.id !== t.loanId);
+      if (t?.loanId && state.loan) { state.loan.log = state.loan.log.filter(e => e.id !== t.loanId); recheckTargetHits(); }
       save(); render();
     },
     'claim-month': (el, d) => {
