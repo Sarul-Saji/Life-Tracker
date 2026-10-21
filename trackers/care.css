@@ -1,0 +1,84 @@
+/* COMPOUND · trackers/care.css — styles used only by the Care tracker. */
+
+:root {
+  --care-rose: #b04a62;
+  --care-pms: #e5aab6;
+  --care-foll: #c9ddd5;
+  --care-ov: #e2cd96;
+  --care-lut: #e0dbd0;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --care-rose: #e08a9c; --care-pms: #a8566a; --care-foll: #2b4239; --care-ov: #6e5c2e; --care-lut: #34322e; }
+}
+
+.care-hero { text-align: center; padding: 6px 0 4px; }
+.care-ring-wrap { display: grid; place-items: center; margin: 14px 0 6px; }
+.care-ring { max-width: 100%; height: auto; }
+.care-ring .seg { fill: none; opacity: .5; }
+.care-ring .seg.past { opacity: 1; }
+.care-ring .seg.period { stroke: var(--care-rose); }
+.care-ring .seg.pms { stroke: var(--care-pms); }
+.care-ring .seg.follicular { stroke: var(--care-foll); }
+.care-ring .seg.ovulation { stroke: var(--care-ov); }
+.care-ring .seg.luteal { stroke: var(--care-lut); }
+.care-ring .mark { fill: var(--ink); stroke: var(--bg); stroke-width: 3; }
+.care-ring .day { font: 400 44px var(--serif); fill: var(--ink); }
+.care-ring .of { font: 400 13px var(--sans); fill: var(--muted); }
+.care-phase { font: 400 26px/1.2 var(--serif); margin-top: 4px; }
+.care-phase.period, .care-phase.pms { color: var(--care-rose); }
+
+.care-when { margin-top: 16px; }
+
+.care-tip { font-size: 14px; color: var(--ink2); margin-bottom: 14px; }
+.care-how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.care-how .btn { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; height: auto; padding: 12px 4px; font-size: 13px; }
+.care-how .btn svg { width: 20px; height: 20px; }
+.sheet .care-how { margin: 4px 0 6px; }
+.care-xp { text-align: right; margin-top: 10px; color: var(--gold); }
+.care-done { display: flex; align-items: center; gap: 12px; }
+.care-done > svg { width: 28px; height: 28px; padding: 5px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); }
+
+.care-tell { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.care-tell-btn {
+  display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 12px 14px; border-radius: 16px;
+  background: var(--surface); box-shadow: inset 0 0 0 1px var(--line); transition: transform .12s;
+}
+.care-tell-btn:active { transform: scale(.97); }
+.care-tell-btn b { font-weight: 600; font-size: 14px; }
+.care-tell-btn span { font-size: 11.5px; color: var(--muted); }
+.care-tell-btn:disabled { opacity: .45; cursor: default; }
+
+.hist.care-row .mark { background: color-mix(in srgb, var(--care-rose) 14%, var(--surface)); color: var(--care-rose); }
+
+.care-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; font-size: 12px; color: var(--muted); margin: 4px 0 14px; }
+.care-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.care-legend i { width: 10px; height: 10px; border-radius: 3px; }
+.care-legend i.period { background: var(--care-rose); }
+.care-legend i.follicular { background: var(--care-foll); }
+.care-legend i.ovulation { background: var(--care-ov); }
+.care-legend i.luteal { background: var(--care-lut); }
+.care-legend i.pms { background: var(--care-pms); }
+
+.care-details {
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 20px; padding: 14px 16px;
+  border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); text-align: left;
+}
+.care-details span { font-weight: 600; }
+.care-details small { flex: 1; font-size: 12.5px; color: var(--muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.care-details svg { color: var(--muted); width: 18px; height: 18px; }
+.care-lock-btn { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; }
+.care-lock-btn svg { width: 16px; height: 16px; }
+
+.care-note { font-size: 12.5px; color: var(--muted); text-align: center; line-height: 1.5; margin-top: 18px; padding: 0 8px; }
+.care-note b { color: var(--ink2); }
+
+.care-bar.period > i, .care-bar.pms > i, .care-bar.late > i { background: var(--care-rose); }
+.care-bar > i { background: var(--ink2); }
+
+.care-lock { text-align: center; padding-top: 30px; }
+.care-lock-mark { display: inline-grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow); margin-bottom: 16px; }
+.care-lock-mark svg { width: 26px; height: 26px; }
+.care-lock form { text-align: left; }
+.care-pin { letter-spacing: .4em; }
+
+.care-q[hidden], .care-pinfield[hidden] { display: none; }
