@@ -1,0 +1,74 @@
+/* COMPOUND · trackers/flow.css — styles used only by the Flow tracker. */
+
+/* Home card and Flow screen */
+.fl-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); }
+.fl-live .dot, .fl-running .dot { background: var(--accent); animation: fl-pulse 2s ease-in-out infinite; }
+.tr-amount small, .fl-hero small { font: 400 16px var(--sans); color: var(--muted); letter-spacing: 0; }
+
+.fl-running {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 14px 16px; border-radius: 16px;
+  background: var(--accent-soft); color: var(--ink); font-size: 14px; text-align: left;
+}
+.fl-running span:nth-child(2) { flex: 1; }
+.fl-running b { font-weight: 600; }
+.fl-running svg { color: var(--muted); }
+.fl-start { margin-top: 20px; }
+.fl-start svg { width: 18px; height: 18px; }
+
+/* This week: one bar per day, blue = focus time */
+.fl-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
+.fl-col { display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; }
+.fl-val { font-size: 10.5px; color: var(--muted); height: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fl-track { position: relative; width: 100%; max-width: 26px; height: 96px; border-radius: 8px; background: var(--bg); overflow: hidden; }
+.fl-track i { position: absolute; left: 0; right: 0; bottom: 0; background: var(--a2); border-radius: 8px; transition: height 1s cubic-bezier(.2, .7, .2, 1); }
+.fl-day { font-size: 11px; color: var(--muted); }
+.fl-col.today .fl-day { color: var(--ink); font-weight: 600; }
+.fl-col.today .fl-track { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.fl-col.future .fl-track { background: transparent; box-shadow: inset 0 0 0 1px var(--line); }
+
+.fl-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.fl-stats > div { background: var(--surface); border-radius: 16px; box-shadow: var(--shadow); padding: 14px 16px; min-width: 0; }
+.fl-stats .v { font: 400 30px/1.1 var(--serif); white-space: nowrap; }
+.fl-stats .v small { font: 400 13px var(--sans); color: var(--muted); }
+.fl-stats .k { font-size: 12.5px; color: var(--ink2); font-weight: 500; margin-top: 2px; }
+.fl-stats .s { font-size: 11.5px; color: var(--muted); }
+
+.hist.fl-row .mark { background: color-mix(in srgb, var(--a2) 14%, var(--surface)); color: var(--a3); }
+.hist.fl-row .s { overflow-wrap: anywhere; }
+
+.fl-settings {
+  display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 28px; padding: 14px 16px;
+  border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); text-align: left;
+}
+.fl-settings span { font-weight: 600; white-space: nowrap; }
+.fl-settings small { flex: 1; font-size: 12.5px; color: var(--muted); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fl-settings svg { color: var(--muted); width: 18px; height: 18px; }
+
+/* The timer: calm, full screen, one ring */
+.fl-timer { min-height: calc(100vh - 88px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); display: flex; flex-direction: column; }
+.fl-timer .topnav .title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; }
+.fl-stage { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 12px 0; }
+.fl-ring { position: relative; width: min(78vw, 300px); aspect-ratio: 1; }
+.fl-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.fl-ring-track { fill: none; stroke: var(--line); stroke-width: 2.5; }
+.fl-ring-prog { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; transition: stroke-dashoffset 1s linear, stroke .4s; }
+.fl-timer.break .fl-ring-prog, .fl-timer.ready .fl-ring-prog { stroke: var(--a2); }
+.fl-timer.paused .fl-ring-prog { opacity: .35; }
+.fl-clock { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.fl-time { font: 400 68px/1 var(--serif); letter-spacing: -.02em; font-variant-numeric: lining-nums tabular-nums; }
+.fl-timer.paused .fl-time { color: var(--muted); }
+.fl-sub { font-size: 13px; color: var(--muted); margin-top: 8px; }
+.fl-total { font-size: 14px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.fl-phase { color: var(--accent); }
+.fl-timer.break .fl-phase, .fl-timer.ready .fl-phase { color: var(--a2); }
+.fl-timer.paused .fl-phase { color: var(--muted); }
+.fl-stage .btn-text { padding: 4px 0; }
+.fl-controls { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; }
+.fl-note { font-size: 12px; line-height: 1.5; color: var(--muted); text-align: center; margin-top: 16px; }
+
+/* End sheet */
+.fl-rate { margin-bottom: 6px; }
+.fl-rate .purpose { flex: 1; justify-content: center; font: 400 20px var(--serif); padding: 0; }
+.fl-rate-hint { padding: 0 0 16px; font-size: 12px; }
+
+@keyframes fl-pulse { 50% { opacity: .35; } }
