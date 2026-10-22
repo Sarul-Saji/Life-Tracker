@@ -3,7 +3,7 @@
 // and fall back to the saved copy when you're offline.
 // Only the main build session bumps CACHE (once per release). Tracker files don't need listing:
 // every file the app loads is saved for offline use automatically the first time it's fetched.
-const CACHE = 'compound-v15';
+const CACHE = 'compound-v16';
 const ASSETS = [
   './', './index.html', './manifest.json',
   './core/base.css', './core/helpers.js', './core/state.js', './core/game.js', './core/ui.js', './core/home.js', './core/motion.js', './core/main.js',

@@ -31,7 +31,7 @@ core/                 the shared engine — owned by the "Compound: main build" 
   state.js            load/save/upgrade of the single saved state (localStorage key 'lifequest.v1' — NEVER change it)
   game.js             tracker registry + XP, momentum, weekly quests, milestones, levels
   ui.js               render(), go(), kv/notice/ring building blocks, sheets, toasts, sounds, confetti
-  motion.js           count-ups, bar/ring fills, cascades, scroll reveals, ripples, floating +XP
+  motion.js           tiny: removes the screen fade class, floating +XP
   home.js             Home, Profile, XP guide, backups, weekly recap, SOON placeholders
   main.js             event wiring + start-up (loads last)
   base.css            shared design tokens and components (affects every screen)
@@ -104,6 +104,6 @@ Local test data and `.tools/` don't exist in worktrees; that's fine.
    `quests` + `questSlots`, and milestones via `ms(...)`.
 
 ## Design language
-Minimal and dark: an always-dark black gradient with matte grain, frosted-glass cards (use `var(--surface)` + `var(--shadow)`; never hard-code light colours), lots of motion (see `core/motion.js`; reduced-motion phones skip it), Instrument Serif for big numbers/headings, Inter for text, greyscale with
+Minimal, dark and **light on the phone**: an always-dark black gradient, see-through cards (use `var(--surface)` + `var(--shadow)`; never hard-code light colours). Performance rules: no `backdrop-filter` blur, no full-screen overlays or `position: fixed` backgrounds, no looping (`infinite`) animations, no big soft drop-shadows, no scroll listeners; motion is short one-off fades/slides using only opacity and transform. Instrument Serif for big numbers/headings, the phone's own system font for text, greyscale with
 colour only where it carries meaning (grey activity ramp `--a1..4`, `--good` for positive, validated chart colours `--s1..6`,
 gold for XP). Banking-style number inputs (`moneyAttrs()`), bottom sheets for forms, short toasts, no emoji in UI chrome.
