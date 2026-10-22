@@ -78,6 +78,10 @@
 .w-tip b { font-size: 14px; font-weight: 600; color: var(--ink); }
 .w-tip-d { color: var(--ink2); }
 .w-note b { color: var(--ink); }
+.w-val { fill: var(--ink2); font: 500 11px var(--sans); font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+.w-one { margin: 6px 0 0; }
+.w-all { display: block; width: 100%; padding: 12px; border: 0; border-top: 1px solid var(--line); background: none; color: var(--ink); font: 500 13.5px var(--sans); cursor: pointer; }
+.w-list { margin-bottom: 18px; }
 .hist.weighrow .mark { background: var(--accent-soft); color: var(--accent); }
 
 /* Deficit goals: what you burn today and the run of deficit days */

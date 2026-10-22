@@ -303,27 +303,44 @@ function weightSection() {
   const h = H(), s = weightSeries(), last = s[s.length - 1], rate = weightRate(s);
   const ago = last ? hDaysBetween(last.date, todayISO()) : 0, span = last ? hDaysBetween(s[0].date, last.date) : 0;
   const when = !last ? '' : ago <= 0 ? 'Weighed today' : ago === 1 ? 'Weighed yesterday' : `Last weighed ${ago} days ago`;
-  const recent = [...h.weights].sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0)).slice(0, 3);
+  const all = weightsNewestFirst(), recent = all.slice(0, 3);
   return `<div class="section-title"><span>Weight</span><span>${when}</span></div>
     <section class="panel pad weight">
       <div class="gym-top">
         <div><div class="big">${last ? kgFmt(last.avg) : '–'}<small> kg</small></div><div class="muted small">${s.length > 1 ? '7-day average' : 'your last reading'}</div></div>
         <button class="btn btn-primary btn-sm" data-act="weigh">Weigh in</button>
       </div>
-      ${s.length >= 2 ? `${span > 35 ? `<div class="w-range">${[[30, '1M'], [90, '3M'], [0, 'All']].map(([d, l]) =>
+      ${s.length ? `${span > 35 ? `<div class="w-range">${[[30, '1M'], [90, '3M'], [0, 'All']].map(([d, l]) =>
             `<button class="${hWeightRange === d ? 'on' : ''}" data-act="w-range" data-d="${d}">${l}</button>`).join('')}</div>` : ''}
         <div id="w-chart" class="w-chart"></div>
-        <div class="w-legend"><span><i class="k-dot"></i>Weigh-in</span><span><i class="k-line"></i>7-day average</span></div>` : ''}
+        <div class="w-legend"><span><i class="k-dot"></i>Weigh-in</span>${s.length > 1 ? '<span><i class="k-line"></i>7-day average</span>' : ''}</div>
+        ${s.length === 1 ? '<p class="muted small w-one">Weigh in on another day and the line between your dates starts here.</p>' : ''}` : ''}
       <p class="treat-note w-note">${weightVerdict(rate, h.profile.goal, h.profile.weightKg)}</p>
     </section>
-    ${recent.length ? `<section class="panel" style="margin-top:12px">${recent.map(weighItem).join('')}</section>` : ''}`;
+    ${recent.length ? `<section class="panel" style="margin-top:12px">${recent.map(w => weighItem(w)).join('')}
+      ${all.length > 3 ? `<button class="w-all" data-act="weigh-all">See all ${all.length} weigh-ins</button>` : ''}</section>` : ''}`;
 }
 
-function weighItem(w) {
+const weightsNewestFirst = () => [...H().weights].sort((a, b) => b.date.localeCompare(a.date) || (b.ts || 0) - (a.ts || 0));
+
+// Every reading with its date, newest first, plus the change from the one before it
+function weighAllSheet() {
+  const all = weightsNewestFirst();
+  openSheet(`
+    <h2>All weigh-ins</h2>
+    <p class="lead">${all.length} readings, newest first.</p>
+    <div class="panel w-list">${all.map((w, i) => {
+      const prev = all[i + 1], diff = prev ? w.kg - prev.kg : 0;
+      return weighItem(w, prev ? `${diff > 0 ? '+' : diff < 0 ? '−' : '±'}${kgFmt(Math.abs(diff))} kg` : 'first');
+    }).join('')}</div>
+    <div class="sheet-actions"><button class="btn btn-primary" data-close>Done</button></div>`);
+}
+
+function weighItem(w, change) {
   return `<div class="hist weighrow">
     <div class="mark">${icon('target')}</div>
     <div class="main"><div class="t">${kgFmt(w.kg)} kg</div><div class="s">${fmtDayShort(w.date)}${w.ts ? '' : ' · from Your details'}</div></div>
-    <div class="amt">${w.xp ? `<small>+${w.xp} XP</small>` : ''}</div>
+    <div class="amt">${change ? `<small>${change}</small>` : w.xp ? `<small>+${w.xp} XP</small>` : ''}</div>
     <button class="del" data-act="h-del" data-kind="weights" data-id="${w.id}" aria-label="Remove">${icon('x')}</button>
   </div>`;
 }
@@ -335,31 +352,39 @@ function drawWeightChart() {
   const all = weightSeries(), end = all[all.length - 1].date;
   let P = hWeightRange ? all.filter(p => p.date > addDays(end, -hWeightRange)) : all;
   if (P.length < 2) P = all.slice(-2);
-  const W = box.clientWidth, HT = box.clientHeight, L = 34, R = 10, T = 8, B = 24;
+  const W = box.clientWidth, HT = box.clientHeight, L = 34, R = 10, T = 22, B = 24, one = P.length === 1;
   const span = Math.max(1, hDaysBetween(P[0].date, end)), vals = P.flatMap(p => [p.kg, p.avg]);
   let lo = Math.min(...vals), hi = Math.max(...vals);
   const range = Math.max(hi - lo, 1), step = range <= 2 ? 0.5 : range <= 5 ? 1 : range <= 10 ? 2 : 5;
   lo = Math.floor((lo - 0.2) / step) * step;
   hi = Math.ceil((hi + 0.2) / step) * step;
-  const x = d => L + (hDaysBetween(P[0].date, d) / span) * (W - L - R);
+  const x = d => (one ? (L + W - R) / 2 : L + (hDaysBetween(P[0].date, d) / span) * (W - L - R));
   const y = v => T + ((hi - v) / (hi - lo)) * (HT - T - B);
   const short = d => parseISO(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
   let grid = '';
   for (let v = lo; v <= hi + 1e-9; v += step) {
     grid += `<line class="w-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="w-tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${step < 1 ? v.toFixed(1) : v.toFixed(0)}</text>`;
   }
-  const xl = [[P[0].date, 'start'], ...(span >= 21 ? [[addDays(P[0].date, Math.round(span / 2)), 'middle']] : []), [end, 'end']];
+  // With room between points (a few weigh-ins), every point gets its own date and kg; otherwise just the ends
+  const gap = Math.min(Infinity, ...P.slice(1).map((p, i) => x(p.date) - x(P[i].date)));
+  const each = one || gap >= 44;
+  const xl = one ? [[end, 'middle']] : each ? P.map((p, i) => [p.date, i === 0 ? 'start' : i === P.length - 1 ? 'end' : 'middle'])
+    : [[P[0].date, 'start'], ...(span >= 21 ? [[addDays(P[0].date, Math.round(span / 2)), 'middle']] : []), [end, 'end']];
   const r = P.length > 40 ? 3 : 4;
+  // A reading under its average gets its label underneath, away from the line (when there's room above the dates)
+  const ly = p => (p.kg < p.avg && y(p.kg) + 16 <= HT - B ? y(p.kg) + 16 : y(p.kg) - 9);
+  const kgl = each ? P.map((p, i) => `<text class="w-val" x="${x(p.date)}" y="${ly(p)}" text-anchor="${one ? 'middle' : i === 0 ? 'start' : i === P.length - 1 ? 'end' : 'middle'}">${kgFmt(p.kg)}</text>`).join('') : '';
   box.innerHTML = `<svg width="${W}" height="${HT}" role="img" aria-label="Weight from ${kgFmt(P[0].avg)} to ${kgFmt(P[P.length - 1].avg)} kg (7-day average), ${short(P[0].date)} to ${short(end)}">
       ${grid}
       ${xl.map(([d, a]) => `<text class="w-tick" x="${x(d)}" y="${HT - 6}" text-anchor="${a}">${short(d)}</text>`).join('')}
       ${P.map(p => `<circle class="w-dot" cx="${x(p.date)}" cy="${y(p.kg)}" r="${r}"/>`).join('')}
-      <path class="w-line" d="${P.map((p, i) => `${i ? 'L' : 'M'}${x(p.date).toFixed(1)},${y(p.avg).toFixed(1)}`).join('')}"/>
-      <circle class="w-end" cx="${x(end)}" cy="${y(P[P.length - 1].avg)}" r="4.5"/>
+      ${one ? '' : `<path class="w-line" d="${P.map((p, i) => `${i ? 'L' : 'M'}${x(p.date).toFixed(1)},${y(p.avg).toFixed(1)}`).join('')}"/>
+      <circle class="w-end" cx="${x(end)}" cy="${y(P[P.length - 1].avg)}" r="4.5"/>`}
+      ${kgl}
       <line class="w-cross" x1="0" x2="0" y1="${T}" y2="${HT - B}" style="display:none"/>
       <circle class="w-hi" r="5" style="display:none"/>
     </svg>
-    <div class="w-tip" hidden><div><b></b> <span>7-day average</span></div><div class="w-tip-kg"></div><div class="w-tip-d"></div></div>`;
+    <div class="w-tip" hidden><div><b></b> <span>on the scale</span></div><div class="w-tip-d"></div><div class="w-tip-kg"></div></div>`;
   const svg = box.firstElementChild, tip = box.querySelector('.w-tip'), cross = box.querySelector('.w-cross'), dot = box.querySelector('.w-hi');
   // The crosshair snaps to the nearest weigh-in, so you never have to hit a dot exactly
   const show = ev => {
@@ -367,13 +392,13 @@ function drawWeightChart() {
     const p = P.reduce((b, q) => (Math.abs(x(q.date) - px) < Math.abs(x(b.date) - px) ? q : b));
     const cx = x(p.date);
     cross.setAttribute('x1', cx); cross.setAttribute('x2', cx); cross.style.display = '';
-    dot.setAttribute('cx', cx); dot.setAttribute('cy', y(p.avg)); dot.style.display = '';
-    tip.querySelector('b').textContent = `${kgFmt(p.avg)} kg`;
-    tip.querySelector('.w-tip-kg').textContent = `${kgFmt(p.kg)} kg on the scale`;
+    dot.setAttribute('cx', cx); dot.setAttribute('cy', y(p.kg)); dot.style.display = '';
+    tip.querySelector('b').textContent = `${kgFmt(p.kg)} kg`;
     tip.querySelector('.w-tip-d').textContent = fmtDayShort(p.date);
+    tip.querySelector('.w-tip-kg').textContent = one ? '' : `7-day average ${kgFmt(p.avg)} kg`;
     tip.hidden = false;
-    tip.style.left = cx > W / 2 ? `${L + 6}px` : '';
-    tip.style.right = cx > W / 2 ? '' : `${R + 6}px`;
+    tip.style.left = cx >= W / 2 ? `${L + 6}px` : '';
+    tip.style.right = cx >= W / 2 ? '' : `${R + 6}px`;
   };
   svg.addEventListener('pointerdown', show);
   svg.addEventListener('pointermove', show);
@@ -906,6 +931,7 @@ registerTracker({
       save(); render(); suppEditSheet();
     },
     weigh: () => weighSheet(),
+    'weigh-all': () => weighAllSheet(),
     'w-range': (el, d) => { hWeightRange = Number(d.d); render(); },
     'h-settings': () => healthSettingsSheet(),
     'h-why': () => whySheet(),
@@ -925,6 +951,7 @@ registerTracker({
       H()[d.kind] = H()[d.kind].filter(x => x.id !== d.id);
       if (d.kind === 'weights') syncWeight();
       save(); render();
+      if (el.closest('.w-list')) weighAllSheet();   // keep the full list open after removing from it
     },
   },
   onChange(ev) { if (ev.target.closest('#f-gym')) updateGymPreview(); },
