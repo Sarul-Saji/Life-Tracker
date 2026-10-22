@@ -103,3 +103,27 @@
 .sd.today { box-shadow: inset 0 0 0 1.5px var(--ink); }
 .sd:disabled { opacity: .35; cursor: default; }
 .supp-edit { padding: 12px 0 8px; }
+
+/* Day switcher on "Eaten": go back up to a week to add or remove food */
+.day-nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; }
+.day-nav .icon-btn { width: 34px; height: 34px; }
+.day-nav .icon-btn:disabled { opacity: .25; cursor: default; }
+
+/* Calorie history: bars under/over target, target as a tick per day */
+.cals .w-chart { height: 180px; }
+.c-bar { fill: var(--accent); }
+.c-bar.over { fill: var(--warn); }
+.c-bar.now { fill-opacity: .45; }
+.c-target { stroke: var(--ink); stroke-width: 2; stroke-linecap: round; opacity: .7; }
+.c-hi { fill: var(--ink); opacity: .05; }
+.k-bar { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
+.k-bar.over { background: var(--warn); }
+.k-line.t { background: var(--ink); opacity: .7; }
+.w-legend { flex-wrap: wrap; row-gap: 4px; }
+.topfoods { display: grid; gap: 14px; }
+.tf-top { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
+.tf-top b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-top span { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tf-bar { height: 6px; margin: 6px 0 4px; border-radius: 3px; background: var(--line); }
+.tf-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.tf-sub { font-size: 11.5px; color: var(--muted); }

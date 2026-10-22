@@ -189,7 +189,7 @@ function healthCard() {
 }
 
 function healthView() {
-  const h = H(), today = todayISO(), f = fuelDay(today), hs = healthStats(), t = f.t, target = h.settings.gymTarget;
+  const h = H(), today = todayISO(), fd = foodDay(), f = fuelDay(fd), hs = healthStats(), t = f.t, target = h.settings.gymTarget;
   const wk = weekStart(today), days = [...Array(7)].map((_, i) => addDays(wk, i)), pt = proteinTarget(), left = t.total - f.kcal;
   const narrow = dt => parseISO(dt).toLocaleDateString('en-GB', { weekday: 'narrow' });
   const rota = days.map(dt => {
@@ -205,7 +205,8 @@ function healthView() {
     next = free.length ? `Next good gym day: <b>${free[0] === today ? 'today' : parseISO(free[0]).toLocaleDateString('en-GB', { weekday: 'long' })}</b> (day off). Training on a shift day earns a +${SHIFT_GYM_BONUS} XP bonus.`
       : `${target - hs.thisWeek} more to go this week. Training on a shift day earns a +${SHIFT_GYM_BONUS} XP bonus.`;
   }
-  const todayFood = h.food.filter(x => x.date === today).sort((a, b) => b.ts - a.ts);
+  const todayFood = h.food.filter(x => x.date === fd).sort((a, b) => b.ts - a.ts);
+  const dayLabel = fd === today ? 'today' : fd === addDays(today, -1) ? 'yesterday' : fmtDayShort(fd);
   const sessions = [...h.gym].sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts).slice(0, 5);
   return `<div>
     ${topNav('Health')}
@@ -216,26 +217,32 @@ function healthView() {
     <div class="rota">${rota}</div>
 
     <section class="hero">
-      <div class="eyebrow">Eaten today</div>
+      <div class="day-nav">
+        <button class="icon-btn" data-act="food-day" data-d="-1" ${fd <= addDays(today, -FOOD_BACK_DAYS) ? 'disabled' : ''} aria-label="Previous day">${icon('chevL')}</button>
+        <div class="eyebrow">Eaten ${dayLabel}</div>
+        <button class="icon-btn" data-act="food-day" data-d="1" ${fd >= today ? 'disabled' : ''} aria-label="Next day">${icon('chevR')}</button>
+      </div>
       <div class="hero-amount">${f.kcal.toLocaleString('en-GB')} <small class="of">/ ${t.total.toLocaleString('en-GB')} kcal</small></div>
       <div class="bar ${f.kcal > t.total * 1.1 ? 'over' : ''}"><i style="width:${Math.min(100, (f.kcal / t.total) * 100)}%"></i></div>
       <div class="hero-meta"><span>${left >= 0 ? `${left.toLocaleString('en-GB')} kcal left` : `${(-left).toLocaleString('en-GB')} kcal over`}</span>
         <button class="link" data-act="h-why">How is this worked out?</button></div>
-      ${isDeficitGoal() ? deficitNote(f) : ''}
+      ${isDeficitGoal() ? deficitNote(f, fd) : ''}
     </section>
 
     <div class="tiles">
       <div class="tile"><div class="k">Protein</div><div class="v">${f.protein}<small> / ${pt}g</small></div><div class="bar"><i style="width:${Math.min(100, (f.protein / pt) * 100)}%"></i></div></div>
       <button class="tile" data-act="water"><div class="k">Water <span class="plus">+</span></div><div class="v">${f.water}<small> / ${WATER_GOAL}</small></div><div class="bar"><i style="width:${Math.min(100, (f.water / WATER_GOAL) * 100)}%"></i></div></button>
-      <button class="tile" data-act="h-why"><div class="k">Fuel score</div><div class="v grade">${f.grade || '—'}</div><div class="s">${f.grade ? 'so far today' : 'log a meal'}</div></button>
+      <button class="tile" data-act="h-why"><div class="k">Fuel score</div><div class="v grade">${f.grade || '—'}</div><div class="s">${!f.grade ? 'log a meal' : fd === today ? 'so far today' : 'for the day'}</div></button>
     </div>
 
-    <div class="section-title"><span>Log a meal</span><span>One tap</span></div>
+    <div class="section-title"><span>Log a meal</span><span>${fd === today ? 'One tap' : `Adding to ${dayLabel}`}</span></div>
     <div class="meals">
       ${h.meals.map(m => `<button class="meal ${m.fries ? 'fries' : ''}" data-act="meal" data-id="${m.id}"><b>${esc(m.name)}</b><span>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g protein</span></button>`).join('')}
       <button class="meal add" data-act="meal-other">${icon('plus')}<b>Something else</b></button>
     </div>
     ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
+
+    ${calSection()}
 
     ${suppSection()}
 
@@ -261,13 +268,14 @@ function healthView() {
 }
 
 // Maintenance (what you burn today) vs what you've eaten, and the run of deficit days
-function deficitNote(f) {
-  const t = f.t, maint = t.total - t.adj, n = calStreak();
-  const status = f.kcal > maint ? `Over maintenance: <b>no deficit today</b>.`
+function deficitNote(f, date) {
+  const t = f.t, maint = t.total - t.adj, n = calStreak(), past = date < todayISO();
+  const status = f.kcal > maint ? `Over maintenance: <b>no deficit ${past ? 'that day' : 'today'}</b>.`
     : f.kcal > t.total ? `Over target, but still <b>${(maint - f.kcal).toLocaleString('en-GB')} kcal under maintenance</b>: a small deficit.`
+    : past ? (calWin(date) ? `<b>Deficit day</b> banked.` : `Under your body-at-rest burn, so <b>not counted</b> as a deficit day.`)
     : `Finish at or under target to bank a <b>deficit day</b>.`;
   return `<div class="def-note">
-      <div class="def-row"><span>You burn today</span><b>~${maint.toLocaleString('en-GB')} kcal</b></div>
+      <div class="def-row"><span>${past ? 'You burned' : 'You burn today'}</span><b>~${maint.toLocaleString('en-GB')} kcal</b></div>
       <div class="def-row"><span>Deficit streak</span><b>${n ? `${n} day${n > 1 ? 's' : ''}` : '—'}</b></div>
       <p>${status}</p>
     </div>`;
@@ -371,7 +379,98 @@ function drawWeightChart() {
   svg.addEventListener('pointermove', show);
   svg.addEventListener('pointerleave', ev => { if (ev.pointerType === 'mouse') { tip.hidden = true; cross.style.display = dot.style.display = 'none'; } });
 }
-addEventListener('resize', () => drawWeightChart());
+addEventListener('resize', () => { drawWeightChart(); drawCalChart(); });
+
+/* ---------- Calorie history ----------
+   Eaten vs that day's target, so you can see how much intake swings. Days with nothing logged stay blank
+   instead of counting as zero, and today is drawn faded because it isn't over yet. */
+let hFoodDay = null;          // the day "Eaten" shows and meals are added to (null = today)
+let hCalRange = 14;           // days shown on the calorie chart
+const FOOD_BACK_DAYS = 7;     // how far back food can be added or removed
+const foodDay = () => hFoodDay || todayISO();
+
+function calDays(n) {
+  const today = todayISO(), logged = new Set(H().food.map(x => x.date));
+  return [...Array(n)].map((_, i) => addDays(today, i - n + 1)).map(d => {
+    const f = fuelDay(d);
+    return { date: d, kcal: f.kcal, target: f.t.total, logged: logged.has(d), today: d === today };
+  });
+}
+
+function calSection() {
+  const all = calDays(hCalRange), days = all.filter(d => d.logged), done = days.filter(d => !d.today);
+  const k = n => Math.round(n).toLocaleString('en-GB');
+  let summary = 'Log a few days of meals to see how your calories move.';
+  if (done.length >= 2) {
+    const avg = sum(done, d => d.kcal) / done.length, avgT = sum(done, d => d.target) / done.length;
+    const lo = Math.min(...done.map(d => d.kcal)), hi = Math.max(...done.map(d => d.kcal));
+    const under = done.filter(d => d.kcal <= d.target).length;
+    summary = `Average <b>${k(avg)} kcal</b> a day against a <b>${k(avgT)}</b> target. Under target on <b>${under} of ${done.length}</b> logged days. Swing: <b>${k(hi - lo)} kcal</b> (${k(lo)} to ${k(hi)}).`;
+  }
+  // Which foods your calories come from over the same range
+  const groups = {};
+  H().food.filter(x => x.date > addDays(todayISO(), -hCalRange)).forEach(x => {
+    const g = groups[x.name] || (groups[x.name] = { name: x.name, kcal: 0, n: 0 });
+    g.kcal += x.kcal; g.n++;
+  });
+  const top = Object.values(groups).sort((a, b) => b.kcal - a.kcal), total = sum(top, g => g.kcal), max = top[0]?.kcal || 1;
+  return `<div class="section-title"><span>Calories</span><span>Last ${hCalRange} days</span></div>
+    <section class="panel pad cals">
+      <div class="w-range">${[[7, '7D'], [14, '14D'], [30, '30D']].map(([d, l]) =>
+        `<button class="${hCalRange === d ? 'on' : ''}" data-act="cal-range" data-d="${d}">${l}</button>`).join('')}</div>
+      ${days.length ? `<div id="c-chart" class="w-chart"></div>
+        <div class="w-legend"><span><i class="k-bar"></i>Under target</span><span><i class="k-bar over"></i>Over target</span><span><i class="k-line t"></i>Target</span></div>` : ''}
+      <p class="treat-note w-note">${summary}</p>
+    </section>
+    ${top.length ? `<div class="section-title"><span>Calories by food</span><span>Last ${hCalRange} days</span></div>
+    <section class="panel pad topfoods">${top.slice(0, 6).map(g => `<div class="tf">
+        <div class="tf-top"><b>${esc(g.name)}</b><span>${k(g.kcal)} kcal · ${Math.round((g.kcal / total) * 100)}%</span></div>
+        <div class="tf-bar"><i style="width:${(g.kcal / max) * 100}%"></i></div>
+        <div class="tf-sub">${g.n} time${g.n > 1 ? 's' : ''} · ${k(g.kcal / g.n)} kcal each</div>
+      </div>`).join('')}${top.length > 6 ? `<p class="tf-sub">Plus ${top.length - 6} more foods, ${k(sum(top.slice(6), g => g.kcal))} kcal</p>` : ''}</section>` : ''}`;
+}
+
+function drawCalChart() {
+  const box = $('#c-chart');
+  if (!box || !state.health) return;
+  const D = calDays(hCalRange), W = box.clientWidth, HT = box.clientHeight, L = 38, R = 6, T = 8, B = 24;
+  const top = Math.max(...D.map(d => Math.max(d.kcal, d.target))) * 1.05, step = top > 3000 ? 1000 : 500, hi = Math.ceil(top / step) * step;
+  const slot = (W - L - R) / D.length, bw = Math.min(24, Math.max(3, slot - 3));
+  const x = i => L + slot * i + slot / 2, y = v => T + (1 - v / hi) * (HT - T - B);
+  const short = d => parseISO(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  let grid = '';
+  for (let v = 0; v <= hi; v += step) grid += `<line class="w-grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="w-tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v >= 1000 ? `${v / 1000}k` : v}</text>`;
+  const xl = [[0, 'start'], [Math.floor((D.length - 1) / 2), 'middle'], [D.length - 1, 'end']];
+  // Bars: 4px rounded top, square at the baseline; target as a short tick across each day's slot
+  const bar = (d, i) => {
+    if (!d.logged) return '';
+    const h = Math.max(1, y(0) - y(d.kcal)), r = Math.min(4, bw / 2, h), x0 = x(i) - bw / 2, y0 = y(d.kcal);
+    return `<path class="c-bar ${d.kcal > d.target ? 'over' : ''} ${d.today ? 'now' : ''}" d="M${x0},${y(0)}V${y0 + r}Q${x0},${y0} ${x0 + r},${y0}H${x0 + bw - r}Q${x0 + bw},${y0} ${x0 + bw},${y0 + r}V${y(0)}Z"/>`;
+  };
+  box.innerHTML = `<svg width="${W}" height="${HT}" role="img" aria-label="Calories eaten each day against target, last ${hCalRange} days">
+      ${grid}
+      ${xl.map(([i, a]) => `<text class="w-tick" x="${a === 'start' ? L : a === 'end' ? W - R : x(i)}" y="${HT - 6}" text-anchor="${a}">${D[i].today ? 'Today' : short(D[i].date)}</text>`).join('')}
+      ${D.map(bar).join('')}
+      ${D.map((d, i) => `<line class="c-target" x1="${x(i) - slot / 2 + 1}" x2="${x(i) + slot / 2 - 1}" y1="${y(d.target)}" y2="${y(d.target)}"/>`).join('')}
+      <rect class="c-hi" y="${T}" height="${HT - T - B}" style="display:none"/>
+    </svg>
+    <div class="w-tip" hidden><div><b></b> <span></span></div><div class="w-tip-kg"></div><div class="w-tip-d"></div></div>`;
+  const svg = box.firstElementChild, tip = box.querySelector('.w-tip'), hl = box.querySelector('.c-hi');
+  const show = ev => {
+    const i = Math.max(0, Math.min(D.length - 1, Math.floor((ev.clientX - svg.getBoundingClientRect().left - L) / slot))), d = D[i];
+    hl.setAttribute('x', x(i) - slot / 2); hl.setAttribute('width', slot); hl.style.display = '';
+    tip.querySelector('b').textContent = d.logged ? `${d.kcal.toLocaleString('en-GB')} kcal` : 'Nothing logged';
+    tip.querySelector('span').textContent = d.logged ? (d.today ? 'so far' : 'eaten') : '';
+    tip.querySelector('.w-tip-kg').textContent = `Target ${d.target.toLocaleString('en-GB')} kcal${d.logged && !d.today ? ` · ${d.kcal > d.target ? `${(d.kcal - d.target).toLocaleString('en-GB')} over` : `${(d.target - d.kcal).toLocaleString('en-GB')} under`}` : ''}`;
+    tip.querySelector('.w-tip-d').textContent = d.today ? 'Today' : fmtDayShort(d.date);
+    tip.hidden = false;
+    tip.style.left = x(i) > W / 2 ? `${L + 6}px` : '';
+    tip.style.right = x(i) > W / 2 ? '' : `${R + 6}px`;
+  };
+  svg.addEventListener('pointerdown', show);
+  svg.addEventListener('pointermove', show);
+  svg.addEventListener('pointerleave', ev => { if (ev.pointerType === 'mouse') { tip.hidden = true; hl.style.display = 'none'; } });
+}
 
 function healthFields(p, s) {
   const chips = (name, opts, val) => `<div class="purposes">${opts.map(([v, l]) =>
@@ -588,7 +687,9 @@ function addHealth(kind, e, msgFor, big = false) {
   const g0 = globalStats();
   let xp = 0, mult = 1;
   const waterFull = kind === 'water' && H().water.filter(w => w.date === e.date).length >= WATER_GOAL;
-  if (!waterFull) ({ xp, mult } = award(H_XP[kind] + (e.bonus || 0)));
+  // Food and water added to a past day fix the record but earn no XP
+  const backfill = (kind === 'food' || kind === 'water') && e.date < todayISO();
+  if (!waterFull && !backfill) ({ xp, mult } = award(H_XP[kind] + (e.bonus || 0)));
   Object.assign(e, { id: uid(), ts: Date.now(), xp, mult });
   H()[kind].push(e);
   if (kind === 'weights') syncWeight();
@@ -598,10 +699,10 @@ function addHealth(kind, e, msgFor, big = false) {
 }
 
 function logMeal(m) {
-  addHealth('food', { date: todayISO(), mealId: m.id, name: m.name, kcal: m.kcal, protein: m.protein, fries: !!m.fries }, e => {
-    const f = fuelDay(todayISO()), left = f.t.total - f.kcal;
-    const fryNote = f.shift && !f.fries ? ' · fry-free shift so far' : '';
-    return `${esc(e.name)} · ${e.kcal.toLocaleString('en-GB')} kcal · ${left >= 0 ? `${left.toLocaleString('en-GB')} left` : `${(-left).toLocaleString('en-GB')} over`} today${fryNote} · <b>${xpLabel(e)}</b>`;
+  addHealth('food', { date: foodDay(), mealId: m.id, name: m.name, kcal: m.kcal, protein: m.protein, fries: !!m.fries }, e => {
+    const f = fuelDay(e.date), left = f.t.total - f.kcal, today = e.date === todayISO();
+    const fryNote = today && f.shift && !f.fries ? ' · fry-free shift so far' : '';
+    return `${esc(e.name)} · ${e.kcal.toLocaleString('en-GB')} kcal · ${left >= 0 ? `${left.toLocaleString('en-GB')} left` : `${(-left).toLocaleString('en-GB')} over`} ${today ? 'today' : `on ${fmtDayShort(e.date)}`}${fryNote}${e.xp ? ` · <b>${xpLabel(e)}</b>` : ''}`;
   });
 }
 
@@ -778,7 +879,14 @@ registerTracker({
       save();
       healthSettingsSheet();
     },
-    water: () => addHealth('water', { date: todayISO() }, e => `Water ${fuelDay(todayISO()).water} of ${WATER_GOAL}${e.xp ? ` · <b>${xpLabel(e)}</b>` : ''}`),
+    water: () => addHealth('water', { date: foodDay() }, e => `Water ${fuelDay(e.date).water} of ${WATER_GOAL}${e.date < todayISO() ? ` on ${fmtDayShort(e.date)}` : ''}${e.xp ? ` · <b>${xpLabel(e)}</b>` : ''}`),
+    'food-day': (el, d) => {
+      const today = todayISO(), next = addDays(foodDay(), Number(d.d));
+      if (next > today || next < addDays(today, -FOOD_BACK_DAYS)) return;
+      hFoodDay = next === today ? null : next;
+      render();
+    },
+    'cal-range': (el, d) => { hCalRange = Number(d.d); render(); },
     'gym-log': () => gymSheet(),
     supp: (el, d) => {
       const s = H().supps.list.find(x => x.id === d.id);
@@ -820,5 +928,7 @@ registerTracker({
     },
   },
   onChange(ev) { if (ev.target.closest('#f-gym')) updateGymPreview(); },
-  onRender: drawWeightChart,
+  onRender() { drawWeightChart(); drawCalChart(); },
+  // Opening Health always starts on today
+  onEnter(v) { if (v === 'health') hFoodDay = null; },
 });
