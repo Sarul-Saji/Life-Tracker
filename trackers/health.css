@@ -124,10 +124,24 @@
 .k-bar.over { background: var(--warn); }
 .k-line.t { background: var(--ink); opacity: .7; }
 .w-legend { flex-wrap: wrap; row-gap: 4px; }
-.topfoods { display: grid; gap: 14px; }
-.tf-top { display: flex; justify-content: space-between; gap: 10px; font-size: 14px; }
-.tf-top b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tf-top span { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tf-bar { height: 6px; margin: 6px 0 4px; border-radius: 3px; background: var(--line); }
-.tf-bar i { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
-.tf-sub { font-size: 11.5px; color: var(--muted); }
+/* Meal and supplement buttons (each opens its own sheet) */
+.h-open-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; }
+.h-open { display: flex; align-items: center; gap: 10px; padding: 14px 12px; border: 0; border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink); text-align: left; cursor: pointer; min-width: 0; }
+.h-open:active { transform: scale(.97); }
+.h-open > svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.h-open > svg:last-child { width: 14px; height: 14px; }
+.h-open span { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.h-open b { font-weight: 600; font-size: 14px; }
+.h-open small { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.supp-sheet { margin-bottom: 18px; }
+/* Gym days per week */
+.gw-title { margin-top: 16px; font-size: 12px; color: var(--muted); }
+.gw { --bh: 90px; position: relative; display: flex; gap: 6px; margin-top: 8px; }
+.gw-col { flex: 1; min-width: 0; display: grid; justify-items: center; gap: 4px; }
+.gw-col b { height: 14px; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gw-bar { width: 100%; max-width: 26px; height: var(--bh); display: flex; align-items: flex-end; border-radius: 6px; background: var(--line); }
+.gw-bar i { display: block; width: 100%; border-radius: 6px; background: var(--muted); }
+.gw-bar i.hit { background: var(--accent); }
+.gw-col span { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.gw-col.now span, .gw-col.now b { color: var(--ink); }
+.gw-target { position: absolute; left: 0; right: 0; bottom: calc(18px + var(--bh) * var(--t)); height: 0; border-top: 2px dashed var(--ink); opacity: .5; pointer-events: none; }

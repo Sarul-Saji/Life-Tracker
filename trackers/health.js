@@ -5,7 +5,7 @@
 
 /* ---------- 4b. Health engine ----------
    Food, gym and the shift rota. The daily calorie target is an estimate:
-   body at rest (Mifflin-St Jeor) × 1.3 for everyday movement,
+   body at rest (Mifflin-St Jeor) × 1.2 for everyday movement (see MOVE_FROM),
    + extra burn on shift days, + gym sessions logged that day, ± the goal. */
 const DEFAULT_MEALS = [
   { id: 'm-burger', name: 'Burger and fries', kcal: 1400, protein: 50, fries: true },
@@ -33,8 +33,13 @@ const dayType = date => (H() && H().rota[date]) || '';
 const gymKcal = mins => Math.round(H().profile.weightKg * mins / 60 * GYM_KCAL_PER_KG_HOUR);
 const proteinTarget = () => Math.round(H().profile.weightKg * 1.6);
 
+// Everyday movement was ×1.3, which double-counted walking on shift days (the shift burn is added on top).
+// It's ×1.2 from this date on; earlier days keep ×1.3 so past deficit days and XP stay as they were.
+const MOVE_FROM = '2026-10-23';
+const moveFactor = date => (date < MOVE_FROM ? 1.3 : 1.2);
+
 function dayTarget(date) {
-  const p = H().profile, base = Math.round(bmr(p) * 1.3);
+  const p = H().profile, base = Math.round(bmr(p) * moveFactor(date));
   const shift = dayType(date) === 'shift' ? H().settings.shiftBurn : 0;
   const gym = sum(H().gym.filter(s => s.date === date), s => s.kcal);
   const adj = GOALS[p.goal].adj;
@@ -235,16 +240,13 @@ function healthView() {
       <button class="tile" data-act="h-why"><div class="k">Fuel score</div><div class="v grade">${f.grade || '—'}</div><div class="s">${!f.grade ? 'log a meal' : fd === today ? 'so far today' : 'for the day'}</div></button>
     </div>
 
-    <div class="section-title"><span>Log a meal</span><span>${fd === today ? 'One tap' : `Adding to ${dayLabel}`}</span></div>
-    <div class="meals">
-      ${h.meals.map(m => `<button class="meal ${m.fries ? 'fries' : ''}" data-act="meal" data-id="${m.id}"><b>${esc(m.name)}</b><span>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g protein</span></button>`).join('')}
-      <button class="meal add" data-act="meal-other">${icon('plus')}<b>Something else</b></button>
+    <div class="h-open-row">
+      <button class="h-open" data-act="meal-sheet">${icon('bowl')}<span><b>Log a meal</b><small>${fd === today ? `${todayFood.length ? `${todayFood.length} logged today` : 'Nothing logged yet today'}` : `Adding to ${dayLabel}`}</small></span>${icon('chevR')}</button>
+      ${suppButton()}
     </div>
     ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
 
     ${calSection()}
-
-    ${suppSection()}
 
     ${questStrip('health')}
 
@@ -256,6 +258,7 @@ function healthView() {
       </div>
       <div class="gym-days">${gymDays}</div>
       <p class="treat-note">${next}</p>
+      ${gymWeeksChart()}
     </section>
     ${sessions.length ? `<section class="panel" style="margin-top:12px">${sessions.map(gymItem).join('')}</section>` : ''}
 
@@ -288,6 +291,24 @@ function foodItem(e) {
     <div class="amt">${e.xp ? `<small>+${e.xp} XP</small>` : ''}</div>
     <button class="del" data-act="h-del" data-kind="food" data-id="${e.id}" aria-label="Remove">${icon('x')}</button>
   </div>`;
+}
+
+// Gym days per week for the last 8 weeks (this week last), against the weekly target
+function gymWeeksChart() {
+  const h = H(), target = h.settings.gymTarget, thisWk = weekStart(todayISO());
+  const weeks = [...Array(8)].map((_, i) => addDays(thisWk, (i - 7) * 7)).filter(w => w >= weekStart(h.createdAt || thisWk));
+  const n = w => new Set(h.gym.filter(s => weekStart(s.date) === w).map(s => s.date)).size;
+  const max = Math.max(target, 7), short = d => parseISO(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return `<div class="gw-title">Gym days per week</div>
+    <div class="gw" style="--t:${target / max}">
+      ${weeks.map(w => {
+        const c = n(w);
+        return `<div class="gw-col ${w === thisWk ? 'now' : ''}" aria-label="Week of ${short(w)}: ${c} gym day${c === 1 ? '' : 's'}">
+          <b>${c}</b><div class="gw-bar"><i class="${c >= target ? 'hit' : ''}" style="height:${(c / max) * 100}%"></i></div><span>${w === thisWk ? 'This wk' : short(w)}</span></div>`;
+      }).join('')}
+      <i class="gw-target" aria-hidden="true"></i>
+    </div>
+    <div class="w-legend"><span><i class="k-bar"></i>Days at the gym</span><span><i class="k-line t"></i>Target: ${target} a week</span></div>`;
 }
 
 function gymItem(s) {
@@ -432,13 +453,6 @@ function calSection() {
     const under = done.filter(d => d.kcal <= d.target).length;
     summary = `Average <b>${k(avg)} kcal</b> a day against a <b>${k(avgT)}</b> target. Under target on <b>${under} of ${done.length}</b> logged days. Swing: <b>${k(hi - lo)} kcal</b> (${k(lo)} to ${k(hi)}).`;
   }
-  // Which foods your calories come from over the same range
-  const groups = {};
-  H().food.filter(x => x.date > addDays(todayISO(), -hCalRange)).forEach(x => {
-    const g = groups[x.name] || (groups[x.name] = { name: x.name, kcal: 0, n: 0 });
-    g.kcal += x.kcal; g.n++;
-  });
-  const top = Object.values(groups).sort((a, b) => b.kcal - a.kcal), total = sum(top, g => g.kcal), max = top[0]?.kcal || 1;
   return `<div class="section-title"><span>Calories</span><span>Last ${hCalRange} days</span></div>
     <section class="panel pad cals">
       <div class="w-range">${[[7, '7D'], [14, '14D'], [30, '30D']].map(([d, l]) =>
@@ -446,13 +460,7 @@ function calSection() {
       ${days.length ? `<div id="c-chart" class="w-chart"></div>
         <div class="w-legend"><span><i class="k-bar"></i>Under target</span><span><i class="k-bar over"></i>Over target</span><span><i class="k-line t"></i>Target</span></div>` : ''}
       <p class="treat-note w-note">${summary}</p>
-    </section>
-    ${top.length ? `<div class="section-title"><span>Calories by food</span><span>Last ${hCalRange} days</span></div>
-    <section class="panel pad topfoods">${top.slice(0, 6).map(g => `<div class="tf">
-        <div class="tf-top"><b>${esc(g.name)}</b><span>${k(g.kcal)} kcal · ${Math.round((g.kcal / total) * 100)}%</span></div>
-        <div class="tf-bar"><i style="width:${(g.kcal / max) * 100}%"></i></div>
-        <div class="tf-sub">${g.n} time${g.n > 1 ? 's' : ''} · ${k(g.kcal / g.n)} kcal each</div>
-      </div>`).join('')}${top.length > 6 ? `<p class="tf-sub">Plus ${top.length - 6} more foods, ${k(sum(top.slice(6), g => g.kcal))} kcal</p>` : ''}</section>` : ''}`;
+    </section>`;
 }
 
 function drawCalChart() {
@@ -594,11 +602,33 @@ function suppSection() {
       </div>
     </div>`;
   }).join('');
-  return `<div class="section-title"><span>Supplements</span><span>${list.length ? `${done} of ${list.length} today` : ''}</span></div>
-    <section class="panel supps">
+  return `<h2>Supplements</h2>
+    <p class="lead">${list.length ? `${done} of ${list.length} taken today. Tap a day letter to fix a past day.` : 'Add the supplements you take.'}</p>
+    <section class="panel supps supp-sheet">
       ${rows || '<p class="empty">No supplements on your list.</p>'}
       <button class="small-btn supp-edit" data-act="supp-edit">${icon('plus')}Edit list</button>
-    </section>`;
+    </section>
+    <div class="sheet-actions"><button class="btn btn-primary" data-close>Done</button></div>`;
+}
+const suppSheet = () => openSheet(suppSection());
+
+// The small button on the Health screen that opens the supplements sheet
+function suppButton() {
+  const list = H().supps.list, done = list.filter(s => suppTaken(s.id, todayISO()).length).length;
+  return `<button class="h-open" data-act="supp-sheet">${icon('tick')}<span><b>Supplements</b><small>${list.length ? `${done} of ${list.length} today` : 'None on your list'}</small></span>${icon('chevR')}</button>`;
+}
+
+// Every saved meal as one tap, for the day shown on the Health screen
+function mealSheet() {
+  const fd = foodDay(), today = todayISO();
+  openSheet(`
+    <h2>Log a meal</h2>
+    <p class="lead">${fd === today ? 'One tap adds it to today.' : `Adding to ${fmtDayShort(fd)}.`}</p>
+    <div class="meals">
+      ${H().meals.map(m => `<button class="meal ${m.fries ? 'fries' : ''}" data-act="meal" data-id="${m.id}"><b>${esc(m.name)}</b><span>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g protein</span></button>`).join('')}
+      <button class="meal add" data-act="meal-other">${icon('plus')}<b>Something else</b></button>
+    </div>
+    <div class="sheet-actions"><button class="btn btn-ghost" data-close>Close</button></div>`);
 }
 
 function takeSupp(s, date = todayISO()) {
@@ -676,7 +706,7 @@ function whySheet() {
     <p class="lead">An estimate, not a prescription. It changes with your rota and gym sessions every day.</p>
     <div class="panel">
       ${kv('Body at rest', `${b.toLocaleString('en-GB')} kcal`, 'from height, weight and age')}
-      ${kv('Everyday movement', sign(t.base - b), '×1.3 for normal daily life')}
+      ${kv('Everyday movement', sign(t.base - b), `×${moveFactor(today)} for normal daily life`)}
       ${kv('Shift', t.shift ? sign(t.shift) : '—', t.shift ? 'walking on a long shift' : dayType(today) === 'off' ? 'day off' : 'rota not set')}
       ${kv('Gym today', t.gym ? sign(t.gym) : '—')}
       ${kv('Maintenance', `${(t.total - t.adj).toLocaleString('en-GB')} kcal`, 'what you burn today')}
@@ -897,7 +927,9 @@ registerTracker({
 
   forms: healthForms,
   actions: {
-    meal: (el, d) => { const m = H().meals.find(x => x.id === d.id); if (m) logMeal(m); },
+    meal: (el, d) => { const m = H().meals.find(x => x.id === d.id); if (m) { closeSheet(); logMeal(m); } },
+    'meal-sheet': () => mealSheet(),
+    'supp-sheet': () => suppSheet(),
     'meal-other': () => foodSheet(),
     'meal-remove': (el, d) => {
       H().meals = H().meals.filter(m => m.id !== d.id);
@@ -916,15 +948,16 @@ registerTracker({
     supp: (el, d) => {
       const s = H().supps.list.find(x => x.id === d.id);
       if (!s) return;
-      if (suppTaken(s.id, todayISO()).length) suppAgainSheet(s); else takeSupp(s);
+      if (suppTaken(s.id, todayISO()).length) suppAgainSheet(s); else { takeSupp(s); suppSheet(); }
     },
     'supp-day': (el, d) => {
       const s = H().supps.list.find(x => x.id === d.id);
       if (!s || d.day > todayISO()) return;
       if (suppTaken(s.id, d.day).length) { untickSupp(s.id, d.day); toast(`${esc(s.name)} unticked for ${fmtDayShort(d.day)}.`); }
       else takeSupp(s, d.day);
+      suppSheet();
     },
-    'supp-undo': (el, d) => { closeSheet(); untickSupp(d.id, todayISO()); toast('Unticked for today.'); },
+    'supp-undo': (el, d) => { untickSupp(d.id, todayISO()); suppSheet(); toast('Unticked for today.'); },
     'supp-edit': () => suppEditSheet(),
     'supp-remove': (el, d) => {
       H().supps.list = H().supps.list.filter(x => x.id !== d.id);
