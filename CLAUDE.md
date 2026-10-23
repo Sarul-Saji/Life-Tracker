@@ -29,7 +29,8 @@ index.html            loads everything; one <link> + one <script> line per track
 core/                 the shared engine — owned by the "Compound: main build" session
   helpers.js          formatting, dates, icons, banking-style number inputs (data-money)
   state.js            load/save/upgrade of the single saved state (localStorage key 'lifequest.v1' — NEVER change it)
-  game.js             tracker registry + XP, momentum, weekly quests, milestones, levels
+  game.js             tracker registry + XP, momentum, weekly quests, milestones, levels (XP, levels, quests and
+                      momentum are counted but HIDDEN from the app by owner request; only milestones show)
   ui.js               render(), go(), kv/notice/ring building blocks, sheets, toasts, sounds, confetti
   motion.js           tiny: removes the screen fade class, floating +XP
   home.js             Home, Profile, XP guide, backups, weekly recap, SOON placeholders
@@ -100,7 +101,7 @@ Local test data and `.tools/` don't exist in worktrees; that's fine.
    in the marked tracker blocks (scripts must stay before `core/main.js`).
 3. Store its data under its own key on the saved state (e.g. `state.care`), created in its setup form; add `migrate(s)` later as needed.
 4. If `core/home.js` has a `SOON` placeholder with the same id, it disappears automatically.
-5. Give it XP via `award()` + `finishAction()` (see `addHealth` in `trackers/health.js` for the pattern), its own quests via
+5. Log actions through `award()` + `finishAction()` (XP is counted silently and never shown; any "+N XP" text is stripped on screen) (see `addHealth` in `trackers/health.js` for the pattern), its own quests via
    `quests` + `questSlots`, and milestones via `ms(...)`.
 
 ## Design language

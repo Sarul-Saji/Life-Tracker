@@ -143,10 +143,10 @@ function levelFrom(xp) {
 
 // Showing-up milestones; each tracker adds its own when it registers
 MILESTONES.push(
-  ms('streak-3', 'Three days running', 'Momentum ×1.1 unlocked', 150, g => g.best >= 3),
+  ms('streak-3', 'Three days running', 'Three days in a row', 150, g => g.best >= 3),
   ms('streak-7', 'A full week', 'Seven days in a row', 300, g => g.best >= 7),
   ms('streak-14', 'Two weeks strong', '', 600, g => g.best >= 14),
-  ms('streak-30', 'Thirty-day habit', 'Maximum momentum', 1500, g => g.best >= 30),
+  ms('streak-30', 'Thirty-day habit', 'Thirty days in a row', 1500, g => g.best >= 30),
   ms('streak-100', 'One hundred days', 'This is who you are now', 5000, g => g.best >= 100),
   ms('quest-1', 'First quest complete', '', 150, g => g.questsDone >= 1),
   ms('chest-1', 'First full week', 'Every weekly quest done in one week', 300, g => g.chests >= 1),
@@ -168,23 +168,14 @@ function globalStats() {
   return g;
 }
 
+// Quest milestones are hidden now that quests are (their ids stay so saved data is untouched)
+const HIDDEN_MS = new Set(['quest-1', 'chest-1']);
+const shownMilestones = () => MILESTONES.filter(m => !HIDDEN_MS.has(m.id));
+
 // Everything worth celebrating that changed between two snapshots
 function rewardsBetween(g0, g1) {
   const out = [];
-  if (g0.week.wk === g1.week.wk) {
-    g1.week.list.forEach((q, i) => {
-      if (q.done && !g0.week.list[i]?.done) out.push({ kicker: 'Quest complete', title: q.text, xp: QUEST_XP, icon: 'trophy' });
-    });
-    if (g1.week.chest && !g0.week.chest) out.push({ kicker: 'Full week', title: `All ${g1.week.list.length} quests done`, text: 'Bonus unlocked.', xp: CHEST_XP, icon: 'trophy' });
-  }
-  if (multFor(g1.streak) > multFor(g0.streak))
-    out.push({ kicker: 'Momentum', title: `×${multFor(g1.streak).toFixed(1)} XP`, text: `${g1.streak} days in a row. Every action now earns more.`, icon: 'flame' });
-  MILESTONES.filter(m => g1.unlocked.includes(m.id) && !g0.unlocked.includes(m.id))
-    .forEach(m => out.push({ kicker: 'Milestone', title: m.name, text: m.desc, xp: m.xp, icon: 'star' }));
-  const l0 = levelFrom(g0.xp).lvl, l1 = levelFrom(g1.xp).lvl;
-  if (l1 > l0) {
-    const t0 = titleFor(l0), t1 = titleFor(l1);
-    out.push({ kicker: 'Level up', title: `Level ${l1}`, text: t1 !== t0 ? `New title: ${t1}` : 'Steady progress, compounding.', icon: 'up', level: true });
-  }
-  return out;
+  shownMilestones().filter(m => g1.unlocked.includes(m.id) && !g0.unlocked.includes(m.id))
+    .forEach(m => out.push({ kicker: 'Milestone', title: m.name, text: m.desc, icon: 'star' }));
+  return out;   // quest, momentum and level-up pop-ups are switched off
 }

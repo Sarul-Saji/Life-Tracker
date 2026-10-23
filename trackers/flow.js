@@ -116,7 +116,7 @@ function flowCard() {
   if (!FL()) return `<button class="tracker" data-go="flow-setup">
       <div class="tr-top">${icon('timer')}<span class="grow">Flow</span>${icon('plus')}</div>
       <div class="tr-amount setup">Set up</div>
-      <div class="tr-sub">A calm focus timer. Track deep work, find your best hours and earn XP for every focused minute.</div>
+      <div class="tr-sub">A calm focus timer. Track deep work and find your best hours.</div>
     </button>`;
   const a = FL().active, byDay = flowDayMins(), today = todayISO(), st = flowStreak(byDay);
   const week = sum(Object.entries(byDay).filter(([d]) => d >= weekStart(today)), ([, m]) => m);
@@ -232,7 +232,7 @@ function flowSetupView() {
   return `<div>
     ${topNav('New tracker')}
     <h1 class="page-title">Flow</h1>
-    <p class="page-lead">A calm focus timer. Pick what you're working on, start the clock, and rate how well you focused at the end. Every focused minute earns XP.</p>
+    <p class="page-lead">A calm focus timer. Pick what you're working on, start the clock, and rate how well you focused at the end.</p>
     <section class="panel">
       ${kv('Pomodoro', '25 / 5 min', 'focus, then a break, repeating')}
       ${kv('Deep work', '50 / 10 min', 'longer blocks for hard thinking')}
@@ -412,7 +412,7 @@ function flowFinish(form) {
   const week = sum(f.sessions.filter(s => s.date >= weekStart(todayISO())), s => s.mins);
   finishAction(g0, xp
     ? `${esc(e.label)} · ${flowHM(mins)} of focus · ${flowHM(week)} this week · <b>${xpLabel(e)}</b>`
-    : `${esc(e.label)} · ${flowHM(mins)} saved. Sessions of ${FLOW_MIN}+ minutes earn XP.`, { big: mins >= FLOW_DAY });
+    : `${esc(e.label)} · ${flowHM(mins)} saved.`, { big: mins >= FLOW_DAY });
 }
 
 // After a session ends, the timer's place in the back-button history becomes the Flow screen
@@ -487,7 +487,7 @@ const flowActions = {
   },
   'fl-dist': (el, d) => { const i = $('#f-flend [name=note]'); if (i) i.value = d.v; },
   'fl-del': (el, d) => {
-    if (!confirm('Remove this session? Its XP is removed too.')) return;
+    if (!confirm('Remove this session?')) return;
     FL().sessions = FL().sessions.filter(s => s.id !== d.id);
     save();
     render();

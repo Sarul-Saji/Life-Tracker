@@ -283,7 +283,7 @@ function targetPanel(s) {
   const L = state.loan, ym = ymNow(), t = L.target || 0;
   const head = `<div class="section-title"><span>${ymLabel(ym, { month: 'long' })} target</span><span>${t ? 'extra, on top of the EMI' : ''}</span></div>`;
   if (!t) return `${head}<section class="panel pad target">
-      <p class="tg-note">Pick an amount to pay extra every month. Hitting it earns <b>+${TARGET_XP} XP</b> and pulls every date on your road to freedom closer.</p>
+      <p class="tg-note">Pick an amount to pay extra every month. Hitting it pulls every date on your road to freedom closer.</p>
       <button class="btn btn-ghost btn-block" data-act="target">Set a monthly target</button>
     </section>`;
   const paid = extrasIn(ym), left = Math.max(0, t - paid), met = paid >= t, rate = latestRate(), hit = L.targetHits?.[ym];
@@ -523,7 +523,7 @@ function targetSheet() {
   const L = state.loan, chips = [25000, 50000, 75000, 100000].map(v => `<button type="button" class="chip" data-act="target-chip" data-amt="${v}">${lakh(v)}</button>`).join('');
   openSheet(`
     <h2>Monthly target</h2>
-    <p class="lead">How much you aim to pay off the loan each month, on top of the EMI. Hit it and earn <b>+${TARGET_XP} XP</b>.</p>
+    <p class="lead">How much you aim to pay off the loan each month, on top of the EMI.</p>
     <form id="f-target">
       <label class="field"><span>Extra per month (₹)</span><input id="tg-amt" ${moneyAttrs('inr', L.target || state.settings.plan || '')} placeholder="50,000"></label>
       <div class="chips">${chips}</div>
@@ -628,7 +628,7 @@ const loanForms = {
     save();
     closeSheet();
     render();
-    toast(`Monthly target set: <b>${inr(t)}</b> extra. Hit it and earn <b>+${TARGET_XP} XP</b>.`);
+    toast(`Monthly target set: <b>${inr(t)}</b> extra.`);
   },
 
   'f-sync'(f) {
@@ -738,14 +738,14 @@ registerTracker({
     'target-off': () => {
       state.loan.target = 0;
       save(); closeSheet(); render();
-      toast('Monthly target removed. XP you already earned stays.');
+      toast('Monthly target removed.');
     },
     'target-send': (el, d) => transferSheet(d.gbp, 'extra'),
     'target-go': () => go('loan'),
     'plan-target': () => {
       state.loan.target = Number($('#p-range').value);
       save(); render();
-      toast(`Monthly target set: <b>${inr(state.loan.target)}</b> extra. Hit it and earn <b>+${TARGET_XP} XP</b>.`);
+      toast(`Monthly target set: <b>${inr(state.loan.target)}</b> extra.`);
     },
     'auto-emi': () => {
       state.loan.autoEmi = state.loan.autoEmi === false;

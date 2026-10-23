@@ -218,7 +218,7 @@ function budgetRow(b, ym) {
   const daysLeft = isNow ? parseISO(ymLastDay(ym)).getDate() - new Date().getDate() + 1 : 0;
   const status = !b.kept ? `Over by ${gbp(-b.left)}`
     : isNow ? `${gbp(b.left)} left · ${daysLeft} day${daysLeft === 1 ? '' : 's'} to go${b.left > 0 ? ` · ${gbp(b.left / daysLeft)} a day` : ''}`
-    : 'Kept · +100 XP at close';
+    : 'Kept';
   const cls = !b.kept ? 'over' : b.pct >= 0.8 ? 'close' : '';
   return `<button class="cat-row budget ${cls}" data-act="budget-edit" data-id="${b.id}">
     <div class="mark">${icon(c.icon)}</div><div class="main">
@@ -425,7 +425,7 @@ function budgetSheet(catId = '') {
   const choices = EXPENSE_CATS.filter(c => c.id === catId || !used.includes(c.id));
   openSheet(`
     <h2>${catId ? 'Edit budget' : 'New budget'}</h2>
-    <p class="lead">A monthly limit for one category. Keep it, and you earn +${BUDGET_XP} XP when you close the month.</p>
+    <p class="lead">A monthly limit for one category. See how you did when you close the month.</p>
     <form id="f-budget" data-old="${catId}">
       <div class="cats">${choices.map(c => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${c.id === catId ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
       <label class="field"><span>Monthly limit (£)</span><input name="limit" ${moneyAttrs('gbp', catId ? state.money.budgets[catId] : '')} placeholder="0.00"></label>

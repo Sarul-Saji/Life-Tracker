@@ -214,8 +214,8 @@ function healthView() {
   if (hs.thisWeek >= target) next = 'Target hit this week. Rest is part of the plan.';
   else {
     const free = days.filter(dt => dt >= today && dayType(dt) === 'off' && !h.gym.some(s => s.date === dt));
-    next = free.length ? `Next good gym day: <b>${free[0] === today ? 'today' : parseISO(free[0]).toLocaleDateString('en-GB', { weekday: 'long' })}</b> (day off). Training on a shift day earns a +${SHIFT_GYM_BONUS} XP bonus.`
-      : `${target - hs.thisWeek} more to go this week. Training on a shift day earns a +${SHIFT_GYM_BONUS} XP bonus.`;
+    next = free.length ? `Next good gym day: <b>${free[0] === today ? 'today' : parseISO(free[0]).toLocaleDateString('en-GB', { weekday: 'long' })}</b> (day off).`
+      : `${target - hs.thisWeek} more to go this week.`;
   }
   const todayFood = h.food.filter(x => x.date === fd).sort((a, b) => b.ts - a.ts);
   const dayLabel = fd === today ? 'today' : fd === addDays(today, -1) ? 'yesterday' : fmtDayShort(fd);
@@ -617,7 +617,7 @@ function gymSheet() {
     `<label class="purpose"><input type="radio" name="${name}" value="${v}" ${v === val ? 'checked' : ''} hidden>${l}</label>`).join('')}</div>`;
   openSheet(`
     <h2>Log a session</h2>
-    <p class="lead">Any day counts. On a shift day it's a double win, with +${SHIFT_GYM_BONUS} bonus XP.</p>
+    <p class="lead">Any day counts. On a shift day it's a double win.</p>
     <form id="f-gym">
       <div class="field-label">Duration</div>${chips('mins', [30, 45, 60, 75, 90].map(m => [String(m), `${m} min`]), '60')}
       <label class="field"><span>Date</span><input name="date" type="date" value="${todayISO()}"></label>

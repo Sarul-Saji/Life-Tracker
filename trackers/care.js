@@ -289,7 +289,7 @@ function careCheckSheet() {
     <h2>Check in on ${careName()}</h2>
     <p class="lead">${CARE_PHASES[n.phase].tip}</p>
     <div class="care-how">${CARE_HOW.map(([k, l]) => `<button class="btn btn-ghost" data-act="c-check" data-how="${k}">${careHowIcon(k)}${l}</button>`).join('')}</div>
-    <p class="hint">Tap how you checked in once you've done it. +${award(CARE_XP).xp} XP.</p>
+    <p class="hint">Tap how you checked in once you've done it.</p>
     <button class="btn btn-text btn-block" data-close>Later</button>`);
 }
 

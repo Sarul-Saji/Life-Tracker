@@ -16,6 +16,7 @@ function render() {
   const anim = animateNext;
   if (animateNext) { app.firstElementChild?.classList.add('enter'); animateNext = false; }
   if (state) TRACKERS.forEach(t => t.onRender?.());
+  stripXp(app);
   if (anim) motionIn(app.firstElementChild);
 }
 
@@ -50,6 +51,7 @@ let sheetOnClose = null;
 function openSheet(html, { center = false, onClose = null } = {}) {
   sheetOnClose = onClose;
   $('#modal-root').innerHTML = `<div class="backdrop ${center ? 'center' : ''}"><div class="sheet" role="dialog">${center ? '' : '<div class="grip"></div>'}${html}</div></div>`;
+  stripXp($("#modal-root"));
 }
 function closeSheet() {
   $('#modal-root').innerHTML = '';
@@ -70,7 +72,6 @@ function showRewards(list) {
     <div class="reward-mark">${icon(r.icon || 'star')}</div>
     <div class="reward-title">${r.title}</div>
     ${r.text ? `<p class="reward-text">${r.text}</p>` : ''}
-    <div class="reward-xp">${r.xp ? `+${r.xp.toLocaleString('en-IN')} XP` : ''}</div>
     <button class="btn btn-primary btn-block" data-close>Continue</button>`,
     { center: true, onClose: () => setTimeout(() => showRewards(list), 250) });
 }
@@ -81,11 +82,9 @@ const xpLabel = e => `+${e.xp} XP${e.mult > 1 ? ` ×${e.mult.toFixed(1)}` : ''}`
 // Celebrate an action: sound, haptics, toast, then any rewards it unlocked
 function finishAction(g0, msg, { big = false, el = null } = {}) {
   const g1 = globalStats();
-  if (!g0.today && g1.today) msg += ` · day ${g1.streak} of momentum`;
   if (big) { sfx.chime(); haptic([15, 50, 30]); confetti(el, 60); }
   else { sfx.soft(); haptic(15); }
   toast(msg, big ? 5500 : 3500);
-  xpFloat(msg, el);
   const rewards = rewardsBetween(g0, g1);
   if (rewards.length) setTimeout(() => showRewards(rewards), big ? 1300 : 800);
 }
@@ -93,7 +92,7 @@ function finishAction(g0, msg, { big = false, el = null } = {}) {
 function toast(msg, ms = 3500) {
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = msg;
+  el.innerHTML = stripXpHtml(msg);
   $('#toasts').appendChild(el);
   requestAnimationFrame(() => el.classList.add('show'));
   setTimeout(() => { el.classList.remove('show'); setTimeout(() => el.remove(), 400); }, ms);
