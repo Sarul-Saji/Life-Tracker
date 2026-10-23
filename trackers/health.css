@@ -134,6 +134,27 @@
 .h-open b { font-weight: 600; font-size: 14px; }
 .h-open small { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .supp-sheet { margin-bottom: 18px; }
+/* Meal sheet: the meals scroll on their own so Close never covers them */
+.meal-scroll { max-height: 40vh; overflow-y: auto; margin-bottom: 14px; padding: 2px; overscroll-behavior: contain; }
+.tiles.one { grid-template-columns: 1fr; }
+/* Weekly deficit */
+.dw-progress { margin-top: 12px; }
+.dw-progress i { background: var(--good); }
+.dw { --bh: 80px; }
+.dw-col { flex: 1; min-width: 0; display: grid; justify-items: center; }
+.dw-col b { height: 16px; font-size: 10px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dw-col b.neg { color: var(--warn); }
+.dw-up, .dw-dn { width: 100%; max-width: 26px; display: flex; }
+.dw-up { height: var(--bh); align-items: flex-end; border-bottom: 1px solid var(--line); }
+.dw-dn { height: 20px; align-items: flex-start; }
+.dw-up i, .dw-dn i { display: block; width: 100%; }
+.dw-up i { background: var(--good); border-radius: 5px 5px 0 0; }
+.dw-dn i { background: var(--warn); border-radius: 0 0 5px 5px; }
+.dw-col span { height: 16px; font-size: 10px; color: var(--muted); }
+.dw-col.now { opacity: .55; }
+.dw-col.now span { color: var(--ink); }
+.dw .gw-target { bottom: calc(36px + var(--bh) * var(--t)); }
+.k-bar.good { background: var(--good); }
 /* Gym days per week */
 .gw-title { margin-top: 16px; font-size: 12px; color: var(--muted); }
 .gw { --bh: 90px; position: relative; display: flex; gap: 6px; margin-top: 8px; }

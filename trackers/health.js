@@ -35,16 +35,23 @@ const proteinTarget = () => Math.round(H().profile.weightKg * 1.6);
 
 // Everyday movement was ×1.3, which double-counted walking on shift days (the shift burn is added on top).
 // It's ×1.2 from this date on; earlier days keep ×1.3 so past deficit days and XP stay as they were.
+// From the same date: your own "normal day" burn (Your details) replaces the estimate when set, and on a
+// deficit goal the target IS your burn, so anything eaten under it is deficit (no extra −400 on top).
 const MOVE_FROM = '2026-10-23';
 const moveFactor = date => (date < MOVE_FROM ? 1.3 : 1.2);
+const KCAL_PER_KG_FAT = 7700;   // roughly the energy in 1 kg of body fat
 
-function dayTarget(date) {
-  const p = H().profile, base = Math.round(bmr(p) * moveFactor(date));
-  const shift = dayType(date) === 'shift' ? H().settings.shiftBurn : 0;
+// newPlan: use today's rules for any date (the weekly deficit chart), without changing past days' results
+function dayTarget(date, newPlan = false) {
+  const p = H().profile, st = H().settings, before = !newPlan && date < MOVE_FROM;
+  const base = !before && st.maintKcal ? st.maintKcal : Math.round(bmr(p) * moveFactor(date));
+  const shift = dayType(date) === 'shift' ? (before && st.shiftBurnBefore != null ? st.shiftBurnBefore : st.shiftBurn) : 0;
   const gym = sum(H().gym.filter(s => s.date === date), s => s.kcal);
-  const adj = GOALS[p.goal].adj;
+  const adj = !before && isDeficitGoal() ? 0 : GOALS[p.goal].adj;
   return { base, shift, gym, adj, total: base + shift + gym + adj };
 }
+// What you burned that day (everything except the goal adjustment)
+const dayBurn = (date, newPlan) => { const t = dayTarget(date, newPlan); return t.total - t.adj; };
 
 // One day's food picture and its fuel score (A–D)
 function fuelDay(date) {
@@ -229,15 +236,14 @@ function healthView() {
       </div>
       <div class="hero-amount">${f.kcal.toLocaleString('en-GB')} <small class="of">/ ${t.total.toLocaleString('en-GB')} kcal</small></div>
       <div class="bar ${f.kcal > t.total * 1.1 ? 'over' : ''}"><i style="width:${Math.min(100, (f.kcal / t.total) * 100)}%"></i></div>
-      <div class="hero-meta"><span>${left >= 0 ? `${left.toLocaleString('en-GB')} kcal left` : `${(-left).toLocaleString('en-GB')} kcal over`}</span>
+      <div class="hero-meta"><span>${isDeficitGoal() ? (left >= 0 ? `${left.toLocaleString('en-GB')} kcal under your burn` : `${(-left).toLocaleString('en-GB')} kcal over your burn`)
+        : left >= 0 ? `${left.toLocaleString('en-GB')} kcal left` : `${(-left).toLocaleString('en-GB')} kcal over`}</span>
         <button class="link" data-act="h-why">How is this worked out?</button></div>
       ${isDeficitGoal() ? deficitNote(f, fd) : ''}
     </section>
 
-    <div class="tiles">
+    <div class="tiles one">
       <div class="tile"><div class="k">Protein</div><div class="v">${f.protein}<small> / ${pt}g</small></div><div class="bar"><i style="width:${Math.min(100, (f.protein / pt) * 100)}%"></i></div></div>
-      <button class="tile" data-act="water"><div class="k">Water <span class="plus">+</span></div><div class="v">${f.water}<small> / ${WATER_GOAL}</small></div><div class="bar"><i style="width:${Math.min(100, (f.water / WATER_GOAL) * 100)}%"></i></div></button>
-      <button class="tile" data-act="h-why"><div class="k">Fuel score</div><div class="v grade">${f.grade || '—'}</div><div class="s">${!f.grade ? 'log a meal' : fd === today ? 'so far today' : 'for the day'}</div></button>
     </div>
 
     <div class="h-open-row">
@@ -245,6 +251,8 @@ function healthView() {
       ${suppButton()}
     </div>
     ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
+
+    ${isDeficitGoal() ? deficitSection() : ''}
 
     ${calSection()}
 
@@ -276,7 +284,7 @@ function deficitNote(f, date) {
   const status = f.kcal > maint ? `Over maintenance: <b>no deficit ${past ? 'that day' : 'today'}</b>.`
     : f.kcal > t.total ? `Over target, but still <b>${(maint - f.kcal).toLocaleString('en-GB')} kcal under maintenance</b>: a small deficit.`
     : past ? (calWin(date) ? `<b>Deficit day</b> banked.` : `Under your body-at-rest burn, so <b>not counted</b> as a deficit day.`)
-    : `Finish at or under target to bank a <b>deficit day</b>.`;
+    : `Finish under your burn to bank a <b>deficit day</b>.`;
   return `<div class="def-note">
       <div class="def-row"><span>${past ? 'You burned' : 'You burn today'}</span><b>~${maint.toLocaleString('en-GB')} kcal</b></div>
       <div class="def-row"><span>Deficit streak</span><b>${n ? `${n} day${n > 1 ? 's' : ''}` : '—'}</b></div>
@@ -443,6 +451,45 @@ function calDays(n) {
   });
 }
 
+/* ---------- Weekly deficit ----------
+   Burn minus eaten for each finished day this week (Mon–Sun), added up against the ~7,700 kcal in 1 kg of fat.
+   Days with no food logged don't count (an empty log isn't a real deficit); today shows faded until it's over. */
+function deficitWeek() {
+  const today = todayISO(), wk = weekStart(today), logged = new Set(H().food.map(x => x.date));
+  const days = [...Array(7)].map((_, i) => addDays(wk, i)).map(d => {
+    const has = logged.has(d) && d <= today, v = has ? dayBurn(d, true) - fuelDay(d).kcal : null;
+    return { date: d, v, today: d === today, future: d > today };
+  });
+  const banked = sum(days.filter(d => d.v != null && !d.today), d => d.v);
+  return { days, banked, soFar: banked + (days.find(d => d.today)?.v || 0) };
+}
+
+function deficitSection() {
+  const { days, banked, soFar } = deficitWeek(), k = n => Math.round(n).toLocaleString('en-GB');
+  const perDay = Math.round(KCAL_PER_KG_FAT / 7), up = Math.max(perDay, ...days.map(d => d.v || 0));
+  const narrow = dt => parseISO(dt).toLocaleDateString('en-GB', { weekday: 'narrow' });
+  const pct = Math.max(0, Math.min(100, (banked / KCAL_PER_KG_FAT) * 100)), kg = Math.max(0, banked) / KCAL_PER_KG_FAT;
+  const todayV = days.find(d => d.today)?.v;
+  return `<div class="section-title"><span>Deficit this week</span><span>Goal: 1 kg = ${k(KCAL_PER_KG_FAT)} kcal</span></div>
+    <section class="panel pad defw">
+      <div class="gym-top"><div><div class="big">${banked < 0 ? '−' : ''}${k(Math.abs(banked))}<small> kcal</small></div>
+        <div class="muted small">${banked < 0 ? 'surplus' : 'deficit'} banked · about <b>${kg.toFixed(2)} kg</b> of fat</div></div></div>
+      <div class="bar dw-progress"><i style="width:${pct}%"></i></div>
+      <div class="gw dw" style="--t:${perDay / up}">
+        ${days.map(d => {
+          const v = d.v, h = v > 0 ? (v / up) * 100 : 0, dn = v < 0 ? Math.min(100, (-v / up) * 400) : 0;
+          return `<div class="dw-col ${d.today ? 'now' : ''}" aria-label="${fmtDayShort(d.date)}: ${v == null ? 'nothing logged' : v >= 0 ? `${k(v)} kcal deficit` : `${k(-v)} kcal over`}">
+            <b class="${v < 0 ? 'neg' : ''}">${v == null ? (d.future ? '' : '–') : `${v < 0 ? '+' : ''}${k(Math.abs(v))}`}</b>
+            <div class="dw-up"><i style="height:${h}%"></i></div><div class="dw-dn"><i style="height:${dn}%"></i></div>
+            <span>${narrow(d.date)}</span></div>`;
+        }).join('')}
+        <i class="gw-target" aria-hidden="true"></i>
+      </div>
+      <div class="w-legend"><span><i class="k-bar good"></i>Deficit</span><span><i class="k-bar over"></i>Over</span><span><i class="k-line t"></i>${k(perDay)} a day = 1 kg a week</span></div>
+      <p class="treat-note">${todayV != null ? `Today so far: <b>${k(Math.abs(todayV))} kcal ${todayV >= 0 ? 'under' : 'over'}</b> your burn (counts once the day is over). ` : ''}${banked >= KCAL_PER_KG_FAT ? '<b>1 kg of fat this week.</b>' : `<b>${k(Math.max(0, KCAL_PER_KG_FAT - banked))} kcal</b> to go for 1 kg this week.`} Numbers are estimates; your weight trend is the real check.</p>
+    </section>`;
+}
+
 function calSection() {
   const all = calDays(hCalRange), days = all.filter(d => d.logged), done = days.filter(d => !d.today);
   const k = n => Math.round(n).toLocaleString('en-GB');
@@ -519,8 +566,10 @@ function healthFields(p, s) {
       <div><div class="field-label">Body</div>${chips('sex', [['m', 'Male'], ['f', 'Female']], p.sex)}</div>
     </div>
     <div class="field-label">Gym sessions a week</div>${chips('gym', [[2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']], s.gymTarget)}
+    <label class="field"><span>Calories you burn on a normal day</span><input name="maint" ${moneyAttrs('int', s.maintKcal || '')} placeholder="${Math.round(bmr(p) * 1.2)}">
+      <small>Before any shift or gym. Leave empty to use the estimate from your height, weight and age.</small></label>
     <label class="field"><span>Extra calories burned on a shift day</span><input name="shift" ${moneyAttrs('int', s.shiftBurn)}>
-      <small>Long hospitality shifts on your feet often burn 600–1,000 extra. 800 is a sensible start.</small></label>`;
+      <small>Long hospitality shifts on your feet often burn 600–1,000 extra. 700 is a sensible start.</small></label>`;
 }
 
 function healthSetupView() {
@@ -529,7 +578,7 @@ function healthSetupView() {
     <h1 class="page-title">Health</h1>
     <p class="page-lead">Food, gym and your shift rota in one place. These details set your daily calorie target, and they stay on this device.</p>
     <form id="f-hsetup">
-      ${healthFields({ heightCm: 183, weightKg: 85, age: 27, sex: 'm', goal: 'maintain' }, { gymTarget: 3, shiftBurn: 800 })}
+      ${healthFields({ heightCm: 183, weightKg: 85, age: 27, sex: 'm', goal: 'maintain' }, { gymTarget: 3, shiftBurn: 700 })}
       <div id="h-err" class="err"></div>
       <button class="btn btn-primary btn-block">Start tracking</button>
     </form>
@@ -538,7 +587,8 @@ function healthSetupView() {
 
 function readHealthForm(f) {
   const p = { heightCm: num(f.elements.height.value), weightKg: num(f.elements.weight.value), age: num(f.elements.age.value), sex: f.elements.sex.value || 'm', goal: f.elements.goal.value || 'maintain' };
-  const s = { gymTarget: Number(f.elements.gym.value) || 3, shiftBurn: num(f.elements.shift.value) || 0 };
+  const s = { gymTarget: Number(f.elements.gym.value) || 3, shiftBurn: num(f.elements.shift.value) || 0, maintKcal: num(f.elements.maint.value) || 0 };
+  if (s.maintKcal && !(s.maintKcal >= 1200 && s.maintKcal <= 5000)) return null;
   if (!(p.heightCm > 100 && p.heightCm < 250 && p.weightKg > 30 && p.weightKg < 300 && p.age > 12 && p.age < 100)) return null;
   return { p, s };
 }
@@ -624,11 +674,11 @@ function mealSheet() {
   openSheet(`
     <h2>Log a meal</h2>
     <p class="lead">${fd === today ? 'One tap adds it to today.' : `Adding to ${fmtDayShort(fd)}.`}</p>
-    <div class="meals">
+    <div class="meals meal-scroll">
       ${H().meals.map(m => `<button class="meal ${m.fries ? 'fries' : ''}" data-act="meal" data-id="${m.id}"><b>${esc(m.name)}</b><span>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g protein</span></button>`).join('')}
       <button class="meal add" data-act="meal-other">${icon('plus')}<b>Something else</b></button>
     </div>
-    <div class="sheet-actions"><button class="btn btn-ghost" data-close>Close</button></div>`);
+    <button class="btn btn-ghost btn-block" data-close>Close</button>`);
 }
 
 function takeSupp(s, date = todayISO()) {
@@ -858,6 +908,14 @@ registerTracker({
     s.health.weights = (s.health.weights || []).map(w => (w.id ? w : { ...w, id: uid() }));
     // Supplements arrived later: existing Health users get the starting list once
     if (!s.health.supps) s.health.supps = { list: DEFAULT_SUPPS.map(x => ({ ...x })), log: [] };
+    // Owner's calorie plan (Oct 2026): 2,200 on a normal day, +700 on a shift. Runs once; past days keep the old shift burn.
+    const st = s.health.settings;
+    if (!st.calPlan) {
+      st.shiftBurnBefore = st.shiftBurn;
+      st.shiftBurn = 700;
+      st.maintKcal = st.maintKcal || 2200;
+      st.calPlan = 1;
+    }
   },
 
   views: { health: healthView, 'health-setup': healthSetupView },
