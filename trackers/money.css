@@ -95,3 +95,16 @@ button.cat-row { width: 100%; text-align: left; }
 .future-note b { color: var(--ink2); font-weight: 600; }
 .more-toggle { margin-top: 18px; }
 .mix-cats .treat-note { margin-top: 4px; }
+
+/* Transactions button and page */
+.tx-link {
+  display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 24px; padding: 16px 18px;
+  border-radius: var(--r); background: var(--surface); box-shadow: var(--shadow); text-align: left; font-size: 15px;
+}
+.tx-link .grow { flex: 1; font-weight: 500; }
+.tx-link .muted { font-size: 13px; }
+.tx-link svg { width: 18px; height: 18px; color: var(--muted); }
+.tx-add { margin: 8px 0 4px; }
+.day-head { display: flex; justify-content: space-between; }
+.hist.tap { cursor: pointer; }
+.hist.tap:active { opacity: .6; }

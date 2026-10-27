@@ -4,7 +4,6 @@
    Owned by the "Compound: Money and Loan" session. */
 
 let moneyMonth = ymNow();
-let showAllTx = false;
 let showMoneyMore = false;   // "More" section (six months, recurring) open?
 const TX_XP = { expense: 10, income: 20, transfer: 30, nospend: 20 };
 
@@ -115,19 +114,11 @@ function moneyView() {
   const due = isNow ? dueRecurring() : [];
   const trend = [-5, -4, -3, -2, -1, 0].map(i => monthStats(ymAdd(ym, i)));
   const maxT = Math.max(1, ...trend.flatMap(t => [t.income, t.out]));
-  const monthTx = state.money.tx.filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
+  const monthTx = monthTxList(ym);
   const today = todayISO();
   const canNoSpend = isNow && !state.money.tx.some(t => t.date === today && (t.type === 'expense' || t.type === 'nospend'));
   const canClose = ym < ymNow() && m.txCount && !closed;
   const budgets = budgetStatus(ym);
-
-  // Transactions: today only by default (this month); the full month is one tap away
-  const todayOnly = isNow && !showAllTx;
-  let lastDay = '', txHtml = '';
-  for (const t of todayOnly ? monthTx.filter(x => x.date === today) : monthTx) {
-    if (!todayOnly && t.date !== lastDay) { txHtml += `<div class="day-head">${fmtDayShort(t.date)}</div>`; lastDay = t.date; }
-    txHtml += txItem(t);
-  }
 
   return `<div>
     ${topNav('Money')}
@@ -153,9 +144,7 @@ function moneyView() {
       ${canNoSpend ? `<button class="small-btn" data-act="nospend">${icon('leaf')} Mark today as a no-spend day</button>` : ''}
     </section>
 
-    <div class="section-title"><span>Transactions</span><span>${todayOnly ? 'Today' : `${monthTx.length} this month`}</span></div>
-    <section class="panel tx-box">${txHtml || `<p class="empty">${todayOnly ? 'Nothing logged today yet.' : 'Nothing logged this month yet.'}</p>`}</section>
-    ${isNow && monthTx.length ? `<button class="more" data-act="tx-all">${todayOnly ? `Show all ${monthTx.length} this month` : 'Show today only'}</button>` : ''}
+    <button class="tx-link" data-go="money-tx">${icon('calendar')}<span class="grow">Transactions</span><span class="muted">${monthTx.length} in ${ymLabel(ym, { month: 'long' })}</span>${icon('chevR')}</button>
 
     ${mixCard(m, prev, isNow)}
 
@@ -179,6 +168,37 @@ function moneyView() {
     <div class="section-title"><span>Recurring</span></div>
     <section class="panel">${state.money.recurring.length ? state.money.recurring.map(recItem).join('') : '<p class="empty">Tick "Repeat every month" when logging rent, salary or subscriptions, and they will show up here.</p>'}</section>
     ${budgets.length ? '' : `<button class="more" data-act="budget-new">${icon('plus')} Add a monthly budget</button>`}` : ''}
+  </div>`;
+}
+
+const monthTxList = ym => state.money.tx.filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
+
+// Transactions page: the whole month, day by day. Tap an entry to edit it, × to delete it.
+function moneyTxView() {
+  const ym = moneyMonth, isNow = ym === ymNow(), list = monthTxList(ym);
+  let lastDay = '', html = '';
+  for (const t of list) {
+    if (t.date !== lastDay) {
+      const dayTotal = sum(list.filter(x => x.date === t.date && x.type === 'expense'), x => x.amount);
+      html += `<div class="day-head"><span>${fmtDayShort(t.date)}</span><span>${dayTotal ? `${gbp(dayTotal)} spent` : ''}</span></div>`;
+      lastDay = t.date;
+    }
+    html += txItem(t);
+  }
+  return `<div>
+    ${topNav('Transactions')}
+    <div class="month-switch">
+      <button data-act="month" data-d="-1" aria-label="Previous month">${icon('chevL')}</button>
+      <span class="m">${ymLabel(ym)}</span>
+      <button data-act="month" data-d="1" ${isNow ? 'disabled' : ''} aria-label="Next month">${icon('chevR')}</button>
+    </div>
+    <div class="actions three tx-add">
+      <button class="btn btn-ghost" data-act="add-income">Income</button>
+      <button class="btn btn-primary" data-act="add-expense">Expense</button>
+      <button class="btn btn-ghost" data-act="add-transfer">To India</button>
+    </div>
+    <div class="section-title"><span>${list.length} entr${list.length === 1 ? 'y' : 'ies'}</span><span>Tap one to edit</span></div>
+    <section class="panel tx-box">${html || '<p class="empty">Nothing logged this month yet.</p>'}</section>
   </div>`;
 }
 
@@ -323,7 +343,7 @@ function txItem(t) {
     sub = [t.note ? c.name : '', t.recurringId ? 'Recurring' : ''].filter(Boolean).join(' · ');
     amt = t.type === 'income' ? '+' + gbp(t.amount) : gbp(-t.amount);
   }
-  return `<div class="hist ${t.type}">
+  return `<div class="hist ${t.type}${t.type === 'nospend' ? '' : ' tap'}" ${t.type === 'nospend' ? '' : `data-act="tx-edit" data-id="${t.id}"`}>
     <div class="mark">${icon(ic)}</div>
     <div class="main"><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>
     <div class="amt">${amt}</div>
@@ -345,44 +365,58 @@ function recItem(r) {
 /* Sheets */
 const defaultDate = () => (moneyMonth === ymNow() || view !== 'money' ? todayISO() : ymLastDay(moneyMonth));
 
-function txSheet(type) {
+// Income or expense: new, or (with `edit`) an existing entry with its details filled in
+function txSheet(type, edit = null) {
   const isInc = type === 'income', cats = isInc ? INCOME_CATS : EXPENSE_CATS;
+  const checked = (c, i) => (edit ? edit.cat === c.id : isInc && i === 0);
   openSheet(`
-    <h2>${isInc ? 'Money in' : 'Money out'}</h2>
-    <p class="lead">${isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
-    <form id="f-tx" data-type="${type}">
-      <label class="field"><span>Amount (£)</span><input name="amount" ${moneyAttrs('gbp')} placeholder="0.00"></label>
-      <div class="cats">${cats.map((c, i) => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${isInc && i === 0 ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
+    <h2>${edit ? (isInc ? 'Edit income' : 'Edit expense') : isInc ? 'Money in' : 'Money out'}</h2>
+    <p class="lead">${edit ? 'Change anything, then save.' : isInc ? 'Salary, tips, refunds: anything that lands in your account.' : 'Amount, category, done.'}</p>
+    <form id="f-tx" data-type="${type}" data-id="${edit ? edit.id : ''}">
+      <label class="field"><span>Amount (£)</span><input name="amount" ${moneyAttrs('gbp', edit ? edit.amount : '')} placeholder="0.00"></label>
+      <div class="cats">${cats.map((c, i) => `<label class="cat"><input type="radio" name="cat" value="${c.id}" ${checked(c, i) ? 'checked' : ''} hidden>${icon(c.icon)}<span>${c.name}</span></label>`).join('')}</div>
       <div class="grid2">
-        <label class="field"><span>Note</span><input name="note" maxlength="40" placeholder="${isInc ? 'October salary' : 'Tesco'}"></label>
-        <label class="field"><span>Date</span><input name="date" type="date" value="${defaultDate()}"></label>
+        <label class="field"><span>Note</span><input name="note" maxlength="40" value="${edit ? esc(edit.note || '') : ''}" placeholder="${isInc ? 'October salary' : 'Tesco'}"></label>
+        <label class="field"><span>Date</span><input name="date" type="date" value="${edit ? edit.date : defaultDate()}"></label>
       </div>
-      <label class="check-row"><input type="checkbox" name="recurring"> Repeat every month</label>
+      ${edit ? '' : '<label class="check-row"><input type="checkbox" name="recurring"> Repeat every month</label>'}
       <div id="tx-err" class="err"></div>
       ${sheetButtons('Save')}
+      ${edit ? `<button type="button" class="btn btn-text btn-danger btn-block" data-act="tx-del" data-id="${edit.id}">Delete this entry</button>` : ''}
     </form>`);
-  setTimeout(() => $('#f-tx [name=amount]')?.focus(), 80);
+  if (!edit) setTimeout(() => $('#f-tx [name=amount]')?.focus(), 80);
 }
 
-function transferSheet(prefill = '', purpose = prefill ? 'extra' : 'emi') {
+// Transfer to India: new, or (with `edit`) an existing one with its details filled in
+function transferSheet(prefill = '', purpose = prefill ? 'extra' : 'emi', edit = null) {
+  if (edit) purpose = edit.purpose;
   const purposes = Object.entries(PURPOSES).map(([id, n]) =>
     `<label class="purpose"><input type="radio" name="purpose" value="${id}" ${id === purpose ? 'checked' : ''} hidden>${n}</label>`).join('');
   openSheet(`
-    <h2>Transfer to India</h2>
-    <p class="lead">What left in pounds, and what arrived in rupees. Your exchange rate is tracked over time.</p>
-    <form id="f-transfer">
+    <h2>${edit ? 'Edit transfer' : 'Transfer to India'}</h2>
+    <p class="lead">${edit ? `Change anything, then save.${edit.loanId ? ' The matching extra loan payment updates too.' : ''}` : 'What left in pounds, and what arrived in rupees. Your exchange rate is tracked over time.'}</p>
+    <form id="f-transfer" data-id="${edit ? edit.id : ''}">
       <div class="grid2">
-        <label class="field"><span>Sent (£)</span><input name="gbp" ${moneyAttrs('gbp', prefill)} placeholder="0.00"></label>
-        <label class="field"><span>Received (₹)</span><input name="inr" ${moneyAttrs('inr')} placeholder="0"></label>
+        <label class="field"><span>Sent (£)</span><input name="gbp" ${moneyAttrs('gbp', edit ? edit.amount : prefill)} placeholder="0.00"></label>
+        <label class="field"><span>Received (₹)</span><input name="inr" ${moneyAttrs('inr', edit ? edit.inr : '')} placeholder="0"></label>
       </div>
       <div class="rate-line" id="rate-line"></div>
       <div class="purposes">${purposes}</div>
-      <label class="field"><span>Date</span><input name="date" type="date" value="${todayISO()}"></label>
+      <label class="field"><span>Date</span><input name="date" type="date" value="${edit ? edit.date : todayISO()}"></label>
       <div class="preview" id="t-preview"></div>
       <div id="tr-err" class="err"></div>
       ${sheetButtons('Save transfer')}
+      ${edit ? `<button type="button" class="btn btn-text btn-danger btn-block" data-act="tx-del" data-id="${edit.id}">Delete this transfer</button>` : ''}
     </form>`);
   updateTransferPreview();
+}
+
+// Remove a transaction, and the extra loan payment it created (if any)
+function removeTx(id) {
+  const t = state.money.tx.find(x => x.id === id);
+  state.money.tx = state.money.tx.filter(x => x.id !== id);
+  if (t?.loanId && state.loan) { state.loan.log = state.loan.log.filter(e => e.id !== t.loanId); recheckTargetHits(); }
+  return t;
 }
 
 function updateTransferPreview() {
@@ -481,6 +515,13 @@ const moneyForms = {
     if (!amount) return err('Enter an amount.');
     if (!catId) return err('Pick a category.');
     const date = f.elements.date.value || todayISO(), note = f.elements.note.value.trim();
+    // Editing: change the entry in place (it keeps its id and when it was first logged)
+    const old = f.dataset.id && state.money.tx.find(x => x.id === f.dataset.id);
+    if (old) {
+      Object.assign(old, { amount, cat: catId, note, date });
+      save(); closeSheet(); render();
+      return toast(`Saved · ${note ? esc(note) : catOf(catId).name} <b>${gbp(amount)}</b> on ${fmtDayShort(date)}`);
+    }
     const t = { type, amount, cat: catId, note, date };
     if (f.elements.recurring.checked) {
       const r = { id: uid(), type, amount, cat: catId, note, day: parseISO(date).getDate() };
@@ -514,6 +555,15 @@ const moneyForms = {
     if (!amount || !inrAmt) return ($('#tr-err').textContent = 'Enter both the pounds sent and the rupees received.');
     const date = f.elements.date.value || todayISO();
     const t0 = { type: 'transfer', amount, inr: inrAmt, purpose, date };
+    // Editing a transfer: replace it, so any extra loan payment it made is worked out again from the new numbers.
+    // Saved quietly: no celebrations for something already logged.
+    if (f.dataset.id) {
+      removeTx(f.dataset.id);
+      createTx(t0);
+      targetHitNote();   // clear any note meant for a brand-new payment
+      save(); closeSheet(); render();
+      return toast(`Saved · <b>${gbp(amount)} → ${inr(inrAmt)}</b> on ${fmtDayShort(date)}${t0.loanId ? ' · loan updated' : ''}`);
+    }
     // Duplicate guard: an extra payment already logged by hand in the loan tracker around the same date?
     if (purpose === 'extra' && state.loan) {
       const near = state.loan.log.find(e => e.type === 'extra' && Math.abs(parseISO(e.date) - parseISO(date)) <= 3 * 864e5 && !state.money.tx.some(t => t.loanId === e.id));
@@ -557,7 +607,7 @@ registerTracker({
     }
   },
 
-  views: { money: moneyView },
+  views: { money: moneyView, 'money-tx': moneyTxView },
   card: moneyCard,
   notices() {
     const out = [], prevYm = ymAdd(ymNow(), -1), due = dueRecurring();
@@ -670,10 +720,14 @@ registerTracker({
     },
     'tx-del': (el, d) => {
       if (!confirm('Remove this entry?')) return;
+      removeTx(d.id);
+      save(); closeSheet(); render();
+    },
+    'tx-edit': (el, d) => {
       const t = state.money.tx.find(x => x.id === d.id);
-      state.money.tx = state.money.tx.filter(x => x.id !== d.id);
-      if (t?.loanId && state.loan) { state.loan.log = state.loan.log.filter(e => e.id !== t.loanId); recheckTargetHits(); }
-      save(); render();
+      if (!t) return;
+      if (t.type === 'transfer') transferSheet('', t.purpose, t);
+      else txSheet(t.type, t);
     },
     'claim-month': (el, d) => {
       const c = closeSummary(d.ym), g0 = globalStats();
@@ -682,7 +736,6 @@ registerTracker({
       finishAction(g0, `${ymLabel(d.ym, { month: 'long' })} closed · grade <b>${c.gr.grade}</b> · <b>+${c.xp} XP</b>`, { big: true });
     },
     mix: (el, d) => focusMix(d.g),
-    'tx-all': () => { showAllTx = !showAllTx; render(); },
     'money-more': () => { showMoneyMore = !showMoneyMore; render(); },
     'budget-new': () => budgetSheet(),
     'budget-edit': (el, d) => budgetSheet(d.id),
