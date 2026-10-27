@@ -5,6 +5,7 @@
 
 let moneyMonth = ymNow();
 let showAllTx = false;
+let showMoneyMore = false;   // "More" section (six months, recurring) open?
 const TX_XP = { expense: 10, income: 20, transfer: 30, nospend: 20 };
 
 const cat = (id, name, ic) => ({ id, name, icon: ic });
@@ -47,7 +48,7 @@ function monthStats(ym) {
   s.left = s.income - s.out;
   s.loan = s.transfer.emi + s.transfer.extra;
   s.saved = s.transfer.savings + Math.max(0, s.left);
-  // "Put to work" = money that built your future: extra loan payments + savings + what's left
+  // "Paid off and saved" (once called put to work) = loan extras + savings + what's left
   s.ptw = s.income > 0 ? (s.transfer.extra + s.saved) / s.income : null;
   s.logDays = days.size;
   return s;
@@ -100,19 +101,18 @@ function moneyCard() {
   const m = monthStats(ymNow());
   return `<button class="tracker" data-go="money">
       <div class="tr-top">${icon('card')}<span class="grow">Money · ${ymLabel(m.ym, { month: 'long' })}</span>${icon('chevR')}</div>
-      <div class="tr-amount ${m.left < 0 ? 'neg' : ''}">${gbp(m.left)}</div>
-      <div class="tr-sub">left this month</div>
+      ${m.income ? `<div class="tr-amount ${m.left < 0 ? 'neg' : ''}">${gbp(m.left)}</div>
+      <div class="tr-sub">left this month</div>` : `<div class="tr-amount">${gbp(m.out)}</div>
+      <div class="tr-sub">spent this month</div>`}
       <div class="bar"><i style="width:${m.income ? Math.min(100, (m.out / m.income) * 100) : 0}%"></i></div>
-      <div class="tr-foot"><span>In ${gbp(m.income)} · Out ${gbp(m.out)}</span><span>${m.ptw == null ? '' : `${Math.round(m.ptw * 100)}% put to work`}</span></div>
+      <div class="tr-foot"><span>In ${gbp(m.income)} · Out ${gbp(m.out)}</span><span>${m.income ? `${Math.round(futureParts(m, false).pct * 100)}% paid off and saved` : ''}</span></div>
     </button>`;
 }
 
 function moneyView() {
   const ym = moneyMonth, isNow = ym === ymNow(), m = monthStats(ym), prev = monthStats(ymAdd(ym, -1));
-  const closed = state.money.closed[ym], grade = closed ? closed.grade : gradeFor(m).grade;
+  const closed = state.money.closed[ym];
   const due = isNow ? dueRecurring() : [];
-  const base = Math.max(m.income, m.out) || 1;
-  const seg = (v, cls) => (v > 0 ? `<i class="${cls}" style="width:${(v / base) * 100}%"></i>` : '');
   const trend = [-5, -4, -3, -2, -1, 0].map(i => monthStats(ymAdd(ym, i)));
   const maxT = Math.max(1, ...trend.flatMap(t => [t.income, t.out]));
   const monthTx = state.money.tx.filter(t => t.date.slice(0, 7) === ym).sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts);
@@ -140,8 +140,7 @@ function moneyView() {
     ${canClose ? notice('close-month', `Close ${ymLabel(ym, { month: 'long' })} and claim your grade`, 'var(--gold)', `data-ym="${ym}"`) : ''}
 
     <section class="hero">
-      <div class="eyebrow">${isNow ? 'Left so far' : 'Left over'}</div>
-      <div class="hero-amount ${m.left < 0 ? 'neg' : ''}">${gbp(m.left)}</div>
+      ${heroNumber(m, isNow)}
       <div class="inout">
         <div><div class="k">Money in</div><div class="v pos">${gbp(m.income)}</div></div>
         <div><div class="k">Money out</div><div class="v">${gbp(m.out)}</div></div>
@@ -151,37 +150,25 @@ function moneyView() {
         <button class="btn btn-primary" data-act="add-expense">Expense</button>
         <button class="btn btn-ghost" data-act="add-transfer">To India</button>
       </div>
-      ${canNoSpend ? `<button class="small-btn" data-act="nospend">${icon('leaf')} Mark today as a no-spend day · +${TX_XP.nospend} XP</button>` : ''}
+      ${canNoSpend ? `<button class="small-btn" data-act="nospend">${icon('leaf')} Mark today as a no-spend day</button>` : ''}
     </section>
 
-    ${isNow ? questStrip('money') : ''}
+    <div class="section-title"><span>Transactions</span><span>${todayOnly ? 'Today' : `${monthTx.length} this month`}</span></div>
+    <section class="panel tx-box">${txHtml || `<p class="empty">${todayOnly ? 'Nothing logged today yet.' : 'Nothing logged this month yet.'}</p>`}</section>
+    ${isNow && monthTx.length ? `<button class="more" data-act="tx-all">${todayOnly ? `Show all ${monthTx.length} this month` : 'Show today only'}</button>` : ''}
 
-    <div class="section-title"><span>Put to work</span><span>${closed ? 'Final grade' : isNow ? 'Grade so far' : 'Projected grade'}</span></div>
-    <section class="panel pad">
-      <div class="ptw">
-        <div><div class="big">${m.ptw == null ? '—' : Math.round(m.ptw * 100) + '%'}</div><div class="muted small">of income saved or sent to the loan</div></div>
-        <div class="grade"><b>${grade}</b><span class="muted small">grade</span></div>
-      </div>
-      <div class="split">${seg(m.living, 'c-living')}${seg(m.loan, 'c-loan')}${seg(m.transfer.family, 'c-family')}${seg(m.saved, 'c-saved')}</div>
-      <div class="legend">
-        <span><i class="sw c-living"></i>Living<b>${gbp(m.living)}</b></span>
-        <span><i class="sw c-loan"></i>Loan<b>${gbp(m.loan)}</b></span>
-        <span><i class="sw c-family"></i>Family<b>${gbp(m.transfer.family)}</b></span>
-        <span><i class="sw c-saved"></i>Saved<b>${gbp(m.saved)}</b></span>
-      </div>
-    </section>
+    ${mixCard(m, prev, isNow)}
 
-    <div class="section-title"><span>Budgets</span><span>${budgets.length ? `${budgets.filter(b => b.kept).length} of ${budgets.length} on track` : ''}</span></div>
+    ${futureCard(m, ym, closed)}
+
+    ${budgets.length ? `<div class="section-title"><span>Budgets</span><span>${budgets.filter(b => b.kept).length} of ${budgets.length} on track</span></div>
     <section class="panel">
       ${budgets.map(b => budgetRow(b, ym)).join('')}
       <button class="more" data-act="budget-new">${icon('plus')} Add a budget</button>
-    </section>
+    </section>` : ''}
 
-
-    ${isNow ? habitsCard() : ''}
-
-    ${mixCard(m, prev)}
-
+    <button class="more more-toggle" data-act="money-more" aria-expanded="${showMoneyMore}">${showMoneyMore ? 'Show less' : 'More: six months, recurring' + (budgets.length ? '' : ', budgets')} ${icon(showMoneyMore ? 'up' : 'chevR')}</button>
+    ${showMoneyMore ? `
     <div class="section-title"><span>Six months</span><span class="key"><i class="sw in"></i>In <i class="sw out"></i>Out</span></div>
     <section class="panel pad">
       <div class="trend">${trend.map(t => `<button class="col ${t.ym === ym ? 'sel' : ''}" data-act="set-month" data-ym="${t.ym}">
@@ -189,30 +176,56 @@ function moneyView() {
         <span class="lbl">${ymLabel(t.ym, { month: 'short' })}</span></button>`).join('')}</div>
     </section>
 
-    <div class="section-title"><span>Transactions</span><span>${todayOnly ? 'Today' : `${monthTx.length} this month`}</span></div>
-    <section class="panel tx-box">${txHtml || `<p class="empty">${todayOnly ? 'Nothing logged today yet.' : 'Nothing logged this month yet.'}</p>`}</section>
-    ${isNow && monthTx.length ? `<button class="more" data-act="tx-all">${todayOnly ? `Show all ${monthTx.length} this month` : 'Show today only'}</button>` : ''}
-
     <div class="section-title"><span>Recurring</span></div>
     <section class="panel">${state.money.recurring.length ? state.money.recurring.map(recItem).join('') : '<p class="empty">Tick "Repeat every month" when logging rent, salary or subscriptions, and they will show up here.</p>'}</section>
+    ${budgets.length ? '' : `<button class="more" data-act="budget-new">${icon('plus')} Add a monthly budget</button>`}` : ''}
   </div>`;
 }
 
-function habitsCard() {
+// Top of the page: what's left once income has landed; until then, simply what's gone out
+function heroNumber(m, isNow) {
+  if (isNow && !m.income) return `<div class="eyebrow">Spent this month</div><div class="hero-amount">${gbp(m.out)}</div>`;
+  return `<div class="eyebrow">${isNow ? 'Left so far' : 'Left over'}</div><div class="hero-amount ${m.left < 0 ? 'neg' : ''}">${gbp(m.left)}</div>`;
+}
+
+/* Paid off and saved
+   The share of income that went to your future: loan extras, savings, and (once the month is over) what was left.
+   During the month "left over" only counts as a side note, because on payday nearly everything is still "left". */
+function futureParts(m, final) {
+  const sent = m.transfer.extra + m.transfer.savings, left = Math.max(0, m.left), total = sent + (final ? left : 0);
+  return { sent, left, total, pct: m.income > 0 ? total / m.income : null };
+}
+
+function futureCard(m, ym, closed) {
+  const isNow = ym === ymNow(), f = futureParts(m, !isNow);
+  const projected = !closed && !isNow ? gradeFor(m).grade : '';
+  const right = closed ? `Grade ${closed.grade}` : projected && m.income ? `Grade ${projected} if closed now` : '';
+  const logDays = Math.min(m.logDays, 15);
+  return `<div class="section-title"><span>Paid off and saved</span><span>${right}</span></div>
+    <section class="panel pad future">
+      <div class="future-big">${f.pct == null ? '—' : Math.round(f.pct * 100) + '%'}</div>
+      <div class="muted small">of ${isNow ? 'this month\'s' : 'the month\'s'} income went to your future${f.pct == null ? ' (log your income to see this)' : ''}</div>
+      <div class="future-rows">
+        ${kv('Loan extra', gbp(m.transfer.extra))}
+        ${kv('Savings', gbp(m.transfer.savings))}
+        ${kv(isNow ? 'Left over so far' : 'Left over', gbp(f.left))}
+      </div>
+      ${isNow ? `<p class="future-note">Left over counts once the month ends, if it's still there. Your grade comes then too. Top marks: <b>40% or more</b> of income here, and logging on <b>15 days</b> (${logDays} so far).</p>` : ''}
+    </section>`;
+}
+
+// Habits sit inside "Where it went": the last 30 days of alcohol, snus and vape, scaled to a year
+function habitsNote() {
   const h = habitStats();
-  if (!h.any) return '';
+  if (!h.total) return '';
   let loanLine = '';
   const rate = latestRate();
-  if (state.loan && rate && h.total > 0) {
+  if (state.loan && rate) {
     const bal = Math.max(0, loanBalance()), base = simulate(bal), plan = simulate(bal, h.total * rate);
     const months = base.months - plan.months;
     if (months >= 0.1) loanLine = ` Sent to the loan instead, that's <b>${soonerLabel(months)}</b> sooner debt-free.`;
   }
-  return `<div class="section-title"><span>Habits</span><span>Last 30 days</span></div>
-    <section class="panel pad habits">
-      ${h.per.map(p => { const c = catOf(p.id); return `<div class="habit"><span class="mark">${icon(c.icon)}</span><span class="name">${c.name}</span><b>${gbp(p.last30)}</b></div>`; }).join('')}
-      <p class="treat-note">If you keep spending at this rate, that's about <b>${gbp(Math.round(h.yearly))} a year</b>.${loanLine}</p>
-    </section>`;
+  return `<p class="treat-note">Last 30 days: <b>${gbp(h.total)}</b>. At that rate, about <b>${gbp(Math.round(h.yearly))} a year</b>.${loanLine}</p>`;
 }
 
 function budgetRow(b, ym) {
@@ -244,7 +257,7 @@ const MIX_HINT = 'Tap a colour or a group to see what\'s inside';
 let openGroup = '';   // which group is expanded in "Where it went"
 
 // "Where it went": the mix bar for the big picture, and each group opens up to show its categories
-function mixCard(m, prev) {
+function mixCard(m, prev, isNow) {
   const head = `<div class="section-title"><span>Where it went</span><span>${m.living ? `${gbp(m.living)} spent` : ''}</span></div>`;
   if (!m.living) return `${head}<section class="panel"><p class="empty">No spending logged this month.</p></section>`;
   const groups = GROUPS.map((g, i) => {
@@ -267,7 +280,7 @@ function mixCard(m, prev) {
       </div>
       <span class="chev">${icon('chevR')}</span>
     </button>
-    ${open ? `<div class="mix-cats">${g.cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, g.cats[0][1], m.living)).join('')}</div>` : ''}`;
+    ${open ? `<div class="mix-cats">${g.cats.map(([id, v]) => catRow(id, v, prev.byCat[id] || 0, g.cats[0][1], m.living)).join('')}${g.id === 'habits' && isNow ? habitsNote() : ''}</div>` : ''}`;
   }).join('');
   const active = groups.find(g => g.id === openGroup);
   return `${head}
@@ -313,7 +326,7 @@ function txItem(t) {
   return `<div class="hist ${t.type}">
     <div class="mark">${icon(ic)}</div>
     <div class="main"><div class="t">${title}</div>${sub ? `<div class="s">${sub}</div>` : ''}</div>
-    <div class="amt">${amt}${t.xp ? `<small>+${t.xp} XP</small>` : ''}</div>
+    <div class="amt">${amt}</div>
     <button class="del" data-act="tx-del" data-id="${t.id}" aria-label="Remove entry">${icon('x')}</button>
   </div>`;
 }
@@ -411,7 +424,7 @@ function closeMonthSheet(ym) {
       ${kv('Money in', gbp(m.income), '', 'pos')}
       ${kv('Living costs', gbp(m.living))}
       ${kv('Sent to the loan', gbp(m.loan))}
-      ${kv('Put to work', m.ptw == null ? '—' : Math.round(m.ptw * 100) + '%', '', 'pos')}
+      ${kv('Paid off and saved', m.ptw == null ? '—' : Math.round(m.ptw * 100) + '%', 'loan extra, savings and left over', 'pos')}
       ${kv('Days logged', m.logDays)}
       ${budgets.length ? kv('Budgets kept', `${kept} of ${budgets.length}`, kept ? `+${kept * BUDGET_XP} XP` : '', kept ? 'pos' : '') : ''}
       ${kv('Left over', gbp(m.left), '', m.left >= 0 ? 'pos' : 'neg')}
@@ -609,7 +622,7 @@ registerTracker({
     ms('tx-50', 'Fifty transactions logged', '', 400, g => g.txCount >= 50),
     ms('tx-250', '250 transactions logged', 'A true record keeper', 1500, g => g.txCount >= 250),
     ms('close-1', 'First month closed', '', 300, g => g.closedCount >= 1),
-    ms('ptw-40', 'Put 40% to work', 'In a closed month', 800, g => g.ptw40),
+    ms('ptw-40', '40% paid off and saved', 'In a closed month', 800, g => g.ptw40),
     ms('grade-a', 'An A month', '', 800, g => g.gradeA),
     ms('grade-aplus', 'A perfect month', 'Grade A+', 1500, g => g.gradeAPlus),
     ms('budget-1', 'First budget kept', 'A limit you stuck to', 300, g => g.budgetMonths >= 1),
@@ -670,6 +683,7 @@ registerTracker({
     },
     mix: (el, d) => focusMix(d.g),
     'tx-all': () => { showAllTx = !showAllTx; render(); },
+    'money-more': () => { showMoneyMore = !showMoneyMore; render(); },
     'budget-new': () => budgetSheet(),
     'budget-edit': (el, d) => budgetSheet(d.id),
     'budget-del': (el, d) => {

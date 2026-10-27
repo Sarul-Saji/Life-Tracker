@@ -12,20 +12,7 @@
 .inout .v { font-weight: 600; font-size: 18px; font-variant-numeric: tabular-nums; }
 .actions.three { grid-template-columns: 1fr 1.2fr 1fr; }
 .actions.three .btn { padding: 0 8px; font-size: 14px; }
-.ptw { display: flex; align-items: flex-end; gap: 16px; }
-.ptw .big { font: 400 48px/1 var(--serif); }
-.ptw .grade { margin-left: auto; text-align: right; }
-.ptw .grade b { display: block; font: 400 44px/1 var(--serif); color: var(--gold); }
-.split { display: flex; gap: 2px; height: 10px; border-radius: 99px; overflow: hidden; background: var(--line); margin: 18px 0 14px; }
-.split i { display: block; height: 100%; }
-.legend { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 18px; font-size: 13px; }
-.legend span { display: flex; align-items: center; gap: 8px; color: var(--muted); }
-.legend b { margin-left: auto; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
-.c-living { background: var(--ink); }
-.c-loan { background: var(--accent); }
-.c-family { background: var(--gold); }
-.c-saved { background: color-mix(in srgb, var(--muted) 55%, var(--line)); }
 .key { display: inline-flex; align-items: center; gap: 6px; }
 .sw.in { background: var(--accent); }
 .sw.out { background: var(--ink2); margin-left: 8px; }
@@ -98,9 +85,13 @@ button.cat-row { width: 100%; text-align: left; }
 .mix-cats .cat-row .mark { width: 32px; height: 32px; }
 .mix-cats .cat-row .mark svg { width: 15px; height: 15px; }
 /* Habits card */
-.habit { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
-.habit .mark { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--bg); color: var(--muted); flex: none; }
-.habit .mark svg { width: 17px; height: 17px; }
-.habit .name { flex: 1; color: var(--ink2); }
-.habit b { font-weight: 600; font-variant-numeric: tabular-nums; }
 
+
+/* Paid off and saved */
+.future-big { font: 400 48px/1 var(--serif); margin-bottom: 6px; font-variant-numeric: lining-nums; }
+.future-rows { margin-top: 10px; }
+.future-rows .kv { padding: 12px 0; }
+.future-note { font-size: 13px; line-height: 1.5; color: var(--muted); margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.future-note b { color: var(--ink2); font-weight: 600; }
+.more-toggle { margin-top: 18px; }
+.mix-cats .treat-note { margin-top: 4px; }
