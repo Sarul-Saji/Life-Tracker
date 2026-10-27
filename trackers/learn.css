@@ -1,0 +1,25 @@
+/* COMPOUND · trackers/learn.css — the Learn syllabus */
+.ln-bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 12px; }
+.ln-bar > i { display: block; height: 100%; background: var(--good); border-radius: 2px; }
+
+.ln-next .ln-wname { margin: 6px 0 4px; }
+.ln-next .d { color: var(--muted); font-size: 14px; }
+.ln-next .hint { padding-bottom: 0; }
+
+.ln-world { padding: 0 20px; margin-bottom: 12px; }
+.ln-world summary { display: flex; align-items: center; gap: 12px; padding: 18px 0; list-style: none; cursor: pointer; }
+.ln-world summary::-webkit-details-marker { display: none; }
+.ln-wname { font: 400 22px/1.15 var(--serif); }
+.ln-count { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ln-goal { font-size: 13px; color: var(--muted); margin: -6px 0 6px; }
+
+.ln-level { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.ln-level .c { width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--line); display: grid; place-items: center; flex: none; color: var(--good); margin-top: 1px; }
+.ln-level .c svg { width: 14px; height: 14px; }
+.ln-level.on .c { box-shadow: inset 0 0 0 1px var(--good); }
+.ln-level.cur .c { box-shadow: inset 0 0 0 2px var(--ink); }
+.ln-level .n { font-size: 14.5px; }
+.ln-level .n b { font-weight: 600; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.ln-level:not(.on):not(.cur) .n { color: var(--muted); }
+.ln-level .d { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.ln-level .ln-now { color: var(--good); }
