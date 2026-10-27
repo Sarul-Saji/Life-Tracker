@@ -8,7 +8,8 @@
    The timer never counts seconds itself. It stores timestamps ("this phase started at 14:02")
    and works out the time from the real clock, so it stays right if the phone sleeps or the app closes.
    Only focus time counts; breaks are timed on screen but never added to totals. */
-const FLOW_MODES = { pomo: 'Pomodoro', deep: 'Deep work', open: 'Open flow' };
+const FLOW_MODES = { pomo: 'Pomodoro', deep: 'Deep work', open: 'Open flow', manual: 'Logged' };
+const FLOW_QUICK = [15, 20, 25, 30, 45, 50, 60, 90, 120];   // one-tap lengths for logging time without the timer
 const FLOW_DEFAULTS = { pomo: [25, 5], deep: [50, 10] };
 const FLOW_LABELS = ['CIMA', 'Building', 'Learning'];
 const FLOW_DISTRACTIONS = ['Phone', 'Noise', 'People', 'Tired', 'Hungry', 'Wandering mind'];
@@ -76,7 +77,7 @@ function flowStreak(byDay) {
 
 // When you focus best: the time of day with the highest focus rating (weighted by minutes)
 function flowBestTime() {
-  const list = flowCounted().filter(s => s.rating);
+  const list = flowCounted().filter(s => s.rating && s.start);   // time logged for a past day has no start time
   if (list.length < 3) return null;
   const g = {};
   list.forEach(s => {
@@ -153,7 +154,10 @@ function flowView() {
       <div class="hero-amount fl-hero">${flowHMBig(byDay[today] || 0)}</div>
       <div class="hero-meta"><span>${flowHM(week)} this week</span><span>${st.today ? 'Streak kept today' : `${FLOW_DAY} min keeps the streak`}</span></div>
     </section>
-    ${a ? '' : `<button class="btn btn-primary btn-block fl-start" data-act="fl-start">${icon('timer')} Start a session</button>`}
+    <div class="fl-go ${a ? 'one' : ''}">
+      ${a ? '' : `<button class="btn btn-primary" data-act="fl-start">${icon('timer')} Start a session</button>`}
+      <button class="btn btn-ghost" data-act="fl-log">${icon('plus')} Log time</button>
+    </div>
 
     <div class="section-title"><span>This week</span><span>${flowHM(week)}</span></div>
     <section class="panel pad"><div class="fl-week">${bars}</div></section>
@@ -177,7 +181,7 @@ function flowView() {
 }
 
 function flowItem(s) {
-  const when = `${fmtDayShort(s.date)} · ${new Date(s.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+  const when = fmtDayShort(s.date) + (s.start ? ` · ${new Date(s.start).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : '') + (s.manual ? ' · logged' : '');
   return `<div class="hist fl-row">
     <div class="mark">${icon('timer')}</div>
     <div class="main"><div class="t">${esc(s.label)} <span>· ${flowHM(s.mins)}</span></div>
@@ -246,6 +250,29 @@ function flowSetupView() {
 /* ---------- Sheets ---------- */
 const flowChips = (name, opts, val) => `<div class="purposes">${opts.map(([v, l]) =>
   `<label class="purpose"><input type="radio" name="${name}" value="${esc(v)}" ${String(v) === String(val) ? 'checked' : ''} hidden>${l}</label>`).join('')}</div>`;
+
+// Focus done without the timer: pick a length and it's added to that day
+function flowLogSheet() {
+  const f = FL(), last = f.last || {};
+  const label = f.labels.includes(last.label) ? last.label : f.labels[0];
+  openSheet(`
+    <h2>Log focus time</h2>
+    <p class="lead">Already done some focused work without the timer? Add it here.</p>
+    <form id="f-fllog">
+      <div class="field-label">How long?</div>
+      ${flowChips('mins', FLOW_QUICK.map(m => [m, m < 60 ? `${m} min` : `${m / 60} h`]), 30)}
+      <label class="field"><span>Or exact minutes</span><input name="other" ${moneyAttrs('int')} placeholder="0"></label>
+      <div class="field-label">On what?</div>
+      ${f.labels.length ? flowChips('label', f.labels.map(l => [l, esc(l)]), label) : ''}
+      <label class="field"><span>${f.labels.length ? 'Or something new' : 'Label'}</span><input name="newlabel" maxlength="24" placeholder="Work, Study…" autocomplete="off"></label>
+      <div class="field-label">Focus rating (optional)</div>
+      <div class="purposes fl-rate">${[1, 2, 3, 4, 5].map(n => `<label class="purpose"><input type="radio" name="rating" value="${n}" hidden>${n}</label>`).join('')}</div>
+      <p class="hint fl-rate-hint">1 scattered · 3 okay · 5 completely absorbed</p>
+      <label class="field"><span>Day</span><input name="date" type="date" value="${todayISO()}" max="${todayISO()}"></label>
+      <div id="fl-err" class="err"></div>
+      ${sheetButtons('Log time')}
+    </form>`);
+}
 
 function flowStartSheet() {
   const f = FL(), last = f.last || {}, s = f.settings;
@@ -455,6 +482,28 @@ const flowForms = {
 
   'f-flend'(form) { flowFinish(form); },
 
+  'f-fllog'(form) {
+    const f = FL(), today = todayISO(), typed = form.elements.newlabel.value.trim();
+    const mins = num(form.elements.other.value) || Number(form.elements.mins.value);
+    const label = typed || form.elements.label?.value || '', date = form.elements.date.value || today;
+    if (!(mins >= 1 && mins <= 720)) return ($('#fl-err').textContent = 'Pick a length between 1 minute and 12 hours.');
+    if (!label) return ($('#fl-err').textContent = "Name what you focused on.");
+    if (date > today) return ($('#fl-err').textContent = "You can't log a day that hasn't happened yet.");
+    if (typed && !f.labels.some(l => l.toLowerCase() === typed.toLowerCase())) f.labels.push(typed);
+    const g0 = globalStats();
+    const { xp, mult } = mins >= FLOW_MIN ? award(mins * FLOW_XP_PER_MIN) : { xp: 0, mult: 1 };
+    // Today: it ended just now. A past day: stamped at midday so it lands on that day, with no start time
+    const now = Date.now(), isToday = date === today, ts = isToday ? now : parseISO(date).getTime() + 12 * 36e5;
+    f.sessions.push({ id: uid(), ts, date, start: isToday ? now - mins * 6e4 : null, label, mode: 'manual', manual: true,
+      blocks: 0, mins, rating: Number(form.elements.rating.value) || null, note: '', xp, mult });
+    f.last = { label, mode: f.last?.mode || 'pomo' };
+    save();
+    closeSheet();
+    render();
+    const week = sum(f.sessions.filter(s => s.date >= weekStart(today)), s => s.mins);
+    finishAction(g0, `${esc(label)} · ${flowHM(mins)} logged${isToday ? '' : ` for ${fmtDayShort(date)}`} · ${flowHM(week)} this week`, { big: mins >= FLOW_DAY });
+  },
+
   'f-flset'(form) {
     const n = name => num(form.elements[name].value);
     const pomo = [n('pf'), n('pb')], deep = [n('df'), n('db')];
@@ -472,6 +521,7 @@ const flowForms = {
 
 const flowActions = {
   'fl-start': () => flowStartSheet(),
+  'fl-log': () => flowLogSheet(),
   'fl-settings': () => flowSettingsSheet(),
   'fl-pause': () => { flowAdvance(FL().active); flowPause(FL().active); save(); render(); sfx.tap(); },
   'fl-resume': () => { flowResume(FL().active); save(); render(); sfx.tap(); },

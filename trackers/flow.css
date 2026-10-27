@@ -2,7 +2,7 @@
 
 /* Home card and Flow screen */
 .fl-live { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); }
-.fl-live .dot, .fl-running .dot { background: var(--accent); animation: fl-pulse 2s ease-in-out infinite; }
+.fl-live .dot, .fl-running .dot { background: var(--accent); }
 .tr-amount small, .fl-hero small { font: 400 16px var(--sans); color: var(--muted); letter-spacing: 0; }
 
 .fl-running {
@@ -12,8 +12,9 @@
 .fl-running span:nth-child(2) { flex: 1; }
 .fl-running b { font-weight: 600; }
 .fl-running svg { color: var(--muted); }
-.fl-start { margin-top: 20px; }
-.fl-start svg { width: 18px; height: 18px; }
+.fl-go { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; margin-top: 20px; }
+.fl-go.one { grid-template-columns: 1fr; }
+.fl-go svg { width: 18px; height: 18px; }
 
 /* This week: one bar per day, blue = focus time */
 .fl-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; }
@@ -71,4 +72,3 @@
 .fl-rate .purpose { flex: 1; justify-content: center; font: 400 20px var(--serif); padding: 0; }
 .fl-rate-hint { padding: 0 0 16px; font-size: 12px; }
 
-@keyframes fl-pulse { 50% { opacity: .35; } }
