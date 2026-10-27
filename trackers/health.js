@@ -56,7 +56,7 @@ const dayBurn = (date, newPlan) => { const t = dayTarget(date, newPlan); return 
 // One day's food picture and its fuel score (A–D)
 function fuelDay(date) {
   const food = H().food.filter(f => f.date === date);
-  const kcal = sum(food, f => f.kcal), protein = sum(food, f => f.protein);
+  const kcal = sum(food, f => f.kcal) + alcKcal(date), protein = sum(food, f => f.protein);
   const water = H().water.filter(w => w.date === date).length;
   const fries = food.some(f => f.fries), shift = dayType(date) === 'shift', t = dayTarget(date);
   if (!food.length) return { kcal, protein, water, fries, shift, t, grade: null };
@@ -93,7 +93,7 @@ function suppStats() {
   return { suppFull: days.length, suppBest: best };
 }
 
-const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0, defDays: 0, defBest: 0, suppFull: 0, suppBest: 0 };
+const ZERO_HEALTH = { meals: 0, gymCount: 0, gymWeeks: 0, gymBest: 0, gymCur: 0, thisWeek: 0, fryFree: 0, fuelA: 0, water8: 0, doubles: 0, weighs: 0, weighWeeks: 0, defDays: 0, defBest: 0, suppFull: 0, suppBest: 0, alcFree: 0, alcBest: 0, nicFree: 0, nicBest: 0 };
 function healthStats() {
   const h = H();
   if (!h) return ZERO_HEALTH;
@@ -121,6 +121,7 @@ function healthStats() {
     weighs: weighIns().length,
     weighWeeks: new Set(weighIns().map(w => weekStart(w.date))).size,
     ...suppStats(),
+    ...subStats(),
     defDays: defWins.length, defBest,
   };
 }
@@ -253,6 +254,8 @@ function healthView() {
     ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
 
     ${isDeficitGoal() ? deficitSection() : ''}
+
+    ${subSection()}
 
     ${calSection()}
 
@@ -717,6 +720,122 @@ function suppEditSheet() {
     </form>`);
 }
 
+/* ---------- Alcohol and nicotine ----------
+   Each day, for each of the two: "None today" (a clean day, +XP when ticked on the day) or what you had.
+   Logging something removes that day's clean mark, so a clean day is always an honest one. Nothing you
+   consume earns XP. Alcohol calories count towards that day's calories, because they're real energy. */
+const SUB_XP = 10;
+const UK_UNITS_WEEK = 14;
+const SUB_KINDS = {
+  alc: { name: 'Alcohol', free: 'alcohol-free', none: 'No alcohol today', items: [
+    { id: 'pint', name: 'Pint of beer', units: 2.3, kcal: 215 },
+    { id: 'can', name: 'Can of beer', sub: '440 ml', units: 2, kcal: 180 },
+    { id: 'wine', name: 'Glass of wine', sub: '175 ml', units: 2.1, kcal: 160 },
+    { id: 'spirit', name: 'Single spirit', sub: '25 ml', units: 1, kcal: 60 },
+    { id: 'cocktail', name: 'Cocktail', units: 2, kcal: 250 },
+  ] },
+  nic: { name: 'Nicotine', free: 'nicotine-free', none: 'No nicotine today', items: [
+    { id: 'pouch', name: 'Pouch', sub: 'snus' },
+    { id: 'cig', name: 'Cigarette' },
+    { id: 'vape', name: 'Vape session' },
+  ] },
+};
+let hSubDay = null;   // the day the check-in sheet shows (null = today)
+const subLog = () => state.health?.subs?.log || [];
+const subUses = (kind, date) => subLog().filter(x => x.kind === kind && x.date === date && !x.clean);
+const subClean = (kind, date) => subLog().find(x => x.kind === kind && x.date === date && x.clean);
+const subStatus = (kind, date) => (subUses(kind, date).length ? 'used' : subClean(kind, date) ? 'clean' : '');
+const alcKcal = date => sum(subUses('alc', date), x => x.kcal || 0);
+const unitsFmt = n => (Math.round(n * 10) / 10).toLocaleString('en-GB');
+
+// Clean days in a row, up to today (or yesterday, if today isn't ticked yet)
+function subStreak(kind) {
+  let d = subStatus(kind, todayISO()) === 'clean' ? todayISO() : addDays(todayISO(), -1), n = 0;
+  while (subStatus(kind, d) === 'clean') { n++; d = addDays(d, -1); }
+  return n;
+}
+function subStats() {
+  const out = {};
+  ['alc', 'nic'].forEach(k => {
+    const days = [...new Set(subLog().filter(x => x.kind === k && x.clean).map(x => x.date))].filter(d => subStatus(k, d) === 'clean').sort();
+    let best = 0, run = 0, prev = null;
+    for (const d of days) { run = prev && addDays(prev, 1) === d ? run + 1 : 1; best = Math.max(best, run); prev = d; }
+    out[`${k}Free`] = days.length; out[`${k}Best`] = best;
+  });
+  return out;
+}
+// One kind's picture over a run of days: days used, clean, how much
+function subRange(kind, from, to) {
+  const days = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) days.push(d);
+  const used = days.filter(d => subStatus(kind, d) === 'used'), clean = days.filter(d => subStatus(kind, d) === 'clean');
+  const uses = subLog().filter(x => x.kind === kind && !x.clean && x.date >= from && x.date <= to);
+  return { days: days.length, used: used.length, clean: clean.length, units: sum(uses, x => x.units || 0), count: sum(uses, x => x.n || 1), uses };
+}
+
+function subSection() {
+  const today = todayISO(), wk = weekStart(today), month = today.slice(0, 8) + '01';
+  const strip = [...Array(30)].map((_, i) => addDays(today, i - 29));
+  const row = k => {
+    const K = SUB_KINDS[k], st = subStatus(k, today), streak = subStreak(k), w = subRange(k, wk, today), m = subRange(k, month, today);
+    const todayTxt = st === 'clean' ? `<b class="good">None today</b>` : st === 'used'
+      ? `<b class="warn">${k === 'alc' ? `${unitsFmt(subRange(k, today, today).units)} units today` : `${subRange(k, today, today).count} today`}</b>` : '<span class="muted">Not checked in today</span>';
+    const weekTxt = k === 'alc'
+      ? `This week: <b>${w.used}</b> drinking day${w.used === 1 ? '' : 's'} · <b>${unitsFmt(w.units)}</b> of ${UK_UNITS_WEEK} units`
+      : `This week: <b>${w.used}</b> day${w.used === 1 ? '' : 's'} · <b>${w.count}</b> used`;
+    return `<div class="sub-row">
+      <div class="sub-top"><b>${K.name}</b>${todayTxt}</div>
+      <div class="sub-big">${streak}<small> day${streak === 1 ? '' : 's'} ${K.free}</small></div>
+      ${k === 'alc' ? `<div class="bar ${w.units > UK_UNITS_WEEK ? 'over' : ''} sub-units"><i style="width:${Math.min(100, (w.units / UK_UNITS_WEEK) * 100)}%"></i></div>` : ''}
+      <div class="sub-line">${weekTxt}</div>
+      <div class="sub-strip" aria-label="Last 30 days">${strip.map(d => `<i class="${subStatus(k, d)} ${d === today ? 'today' : ''}" title="${fmtDayShort(d)}"></i>`).join('')}</div>
+      <div class="sub-line muted">This month: ${m.clean} ${K.free} · ${m.used} with ${k === 'alc' ? 'alcohol' : 'nicotine'}${k === 'alc' && m.units ? ` · ${unitsFmt(m.units)} units` : ''}</div>
+    </div>`;
+  };
+  return `<div class="section-title"><span>Alcohol and nicotine</span><span>Last 30 days</span></div>
+    <section class="panel pad subs">
+      ${row('alc')}${row('nic')}
+      <div class="w-legend"><span><i class="k-bar good"></i>Clean day</span><span><i class="k-bar over"></i>Used</span><span><i class="k-bar none"></i>Not checked in</span></div>
+      <button class="btn btn-primary btn-block sub-btn" data-act="sub-sheet">Check in for today</button>
+    </section>`;
+}
+
+function subSheet() {
+  const today = todayISO(), d = hSubDay || today, label = d === today ? 'today' : fmtDayShort(d);
+  const block = k => {
+    const K = SUB_KINDS[k], uses = subUses(k, d), clean = subClean(k, d);
+    const r = subRange(k, d, d);
+    const head = uses.length ? (k === 'alc' ? `${unitsFmt(r.units)} units · ~${alcKcal(d)} kcal added to ${label}'s calories` : `${r.count} used ${label}`)
+      : clean ? `Marked ${K.free}` : 'Not checked in yet';
+    return `<div class="sub-block">
+      <div class="sub-top"><b>${K.name}</b><span class="muted small">${head}</span></div>
+      ${uses.length ? '' : `<button class="btn ${clean ? 'btn-ghost' : 'btn-primary'} btn-block" data-act="sub-clean" data-kind="${k}">${clean ? 'Undo' : K.none}</button>`}
+      <div class="sub-items">${K.items.map(it => `<button class="sub-item" data-act="sub-add" data-kind="${k}" data-id="${it.id}"><b>${it.name}</b><span>${[it.sub, it.units ? `${it.units} u` : ''].filter(Boolean).join(' · ') || '+1'}</span></button>`).join('')}</div>
+      ${k === 'alc' ? `<form id="f-alc" class="sub-custom"><input name="units" ${moneyAttrs('kg')} placeholder="Units" aria-label="Units"><input name="kcal" ${moneyAttrs('int')} placeholder="kcal" aria-label="Calories"><button class="btn btn-ghost btn-sm">Add other</button></form>` : ''}
+      ${uses.length ? `<div class="panel sub-list">${uses.map(x => `<div class="kv"><span class="k">${esc(x.name)}${x.units ? `<br><small>${unitsFmt(x.units)} units${x.kcal ? ` · ${x.kcal} kcal` : ''}</small>` : ''}</span>
+        <button type="button" class="del" data-act="sub-del" data-id="${x.id}" aria-label="Remove ${esc(x.name)}">${icon('x')}</button></div>`).join('')}</div>` : ''}
+    </div>`;
+  };
+  openSheet(`
+    <div class="day-nav">
+      <button class="icon-btn" data-act="sub-day" data-d="-1" ${d <= addDays(today, -FOOD_BACK_DAYS) ? 'disabled' : ''} aria-label="Previous day">${icon('chevL')}</button>
+      <h2>${d === today ? 'Today' : fmtDayShort(d)}</h2>
+      <button class="icon-btn" data-act="sub-day" data-d="1" ${d >= today ? 'disabled' : ''} aria-label="Next day">${icon('chevR')}</button>
+    </div>
+    <p class="lead">Tap what you had, or mark the day clean. You can fix the last ${FOOD_BACK_DAYS} days.</p>
+    ${block('alc')}${block('nic')}
+    <button class="btn btn-primary btn-block" data-close>Done</button>`, { onClose: () => { hSubDay = null; } });
+}
+
+function addSub(e) {
+  const g0 = globalStats(), d = e.date;
+  // Having something on a day ends that day's clean mark (and the XP it gave)
+  H().subs.log = H().subs.log.filter(x => !(x.kind === e.kind && x.date === d && x.clean));
+  H().subs.log.push(Object.assign(e, { id: uid(), ts: Date.now(), xp: 0 }));
+  save(); render(); subSheet();
+  finishAction(g0, `${esc(e.name)} logged${d === todayISO() ? '' : ` for ${fmtDayShort(d)}`}. Honest logging is how this works.`);
+}
+
 function weighSheet() {
   const s = weightSeries(), last = s[s.length - 1];
   openSheet(`
@@ -815,7 +934,7 @@ const healthForms = {
   'f-hsetup'(f) {
     const r = readHealthForm(f);
     if (!r) return ($('#h-err').textContent = 'Check your height, weight and age.');
-    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), seeded: DEFAULT_MEALS.map(m => m.id), food: [], gym: [], water: [], weights: [{ id: uid(), date: todayISO(), kg: r.p.weightKg }], supps: { list: DEFAULT_SUPPS.map(x => ({ ...x })), log: [] } };
+    state.health = { createdAt: todayISO(), profile: r.p, settings: r.s, rota: {}, meals: DEFAULT_MEALS.map(m => ({ ...m })), seeded: DEFAULT_MEALS.map(m => m.id), food: [], gym: [], water: [], weights: [{ id: uid(), date: todayISO(), kg: r.p.weightKg }], supps: { list: DEFAULT_SUPPS.map(x => ({ ...x })), log: [] }, subs: { log: [] } };
     save();
     view = 'health';
     animateNext = true;
@@ -855,6 +974,12 @@ const healthForms = {
     if (H().supps.list.some(s => s.name.toLowerCase() === name.toLowerCase())) return ($('#s-err').textContent = "It's already on your list.");
     H().supps.list.push({ id: uid(), name });
     save(); render(); suppEditSheet();
+  },
+
+  'f-alc'(f) {
+    const units = num(f.elements.units.value), kcal = Math.round(num(f.elements.kcal.value) || units * 70);
+    if (!(units > 0 && units <= 30)) return toast('Enter the units, for example 1.5.');
+    addSub({ kind: 'alc', date: hSubDay || todayISO(), name: 'Other drink', item: 'other', n: 1, units, kcal });
   },
 
   'f-weigh'(f) {
@@ -908,6 +1033,8 @@ registerTracker({
     s.health.weights = (s.health.weights || []).map(w => (w.id ? w : { ...w, id: uid() }));
     // Supplements arrived later: existing Health users get the starting list once
     if (!s.health.supps) s.health.supps = { list: DEFAULT_SUPPS.map(x => ({ ...x })), log: [] };
+    // Alcohol and nicotine arrived later: an empty log, nothing else touched
+    if (!s.health.subs) s.health.subs = { log: [] };
     // Owner's calorie plan (Oct 2026): 2,200 on a normal day, +700 on a shift. Runs once; past days keep the old shift burn.
     const st = s.health.settings;
     if (!st.calPlan) {
@@ -923,8 +1050,8 @@ registerTracker({
   card: healthCard,
   notices: () => (state.health && !dayType(todayISO()) ? [notice('rota-ask', 'Working today? Set it in your rota', 'var(--a2)')] : []),
 
-  activity(add) { if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns(), ...suppLog()].forEach(x => add(x.ts, x.xp)); },
-  xp: () => (state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns(), ...suppLog()], x => x.xp) : 0),
+  activity(add) { if (state.health) [...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns(), ...suppLog(), ...subLog()].forEach(x => add(x.ts, x.xp)); },
+  xp: () => (state.health ? sum([...state.health.food, ...state.health.gym, ...state.health.water, ...weighIns(), ...suppLog(), ...subLog()], x => x.xp) : 0),
   stats: () => ({ Hs: healthStats() }),
 
   quests: {
@@ -978,15 +1105,45 @@ registerTracker({
     ms('h-supp-1', 'Full supplement day', 'Every one on your list', 100, g => g.Hs.suppFull >= 1),
     ms('h-supp-7', 'Supplements, 7 days straight', '', 400, g => g.Hs.suppBest >= 7),
     ms('h-supp-30', 'Supplements, 30 full days', '', 1000, g => g.Hs.suppFull >= 30),
+    ms('h-alc-1', 'First alcohol-free day', '', 50, g => g.Hs.alcFree >= 1),
+    ms('h-alc-7', 'A week alcohol-free', 'Seven days in a row', 400, g => g.Hs.alcBest >= 7),
+    ms('h-alc-30', 'Thirty days alcohol-free', 'In a row', 1500, g => g.Hs.alcBest >= 30),
+    ms('h-nic-1', 'First nicotine-free day', '', 50, g => g.Hs.nicFree >= 1),
+    ms('h-nic-7', 'A week nicotine-free', 'Seven days in a row', 400, g => g.Hs.nicBest >= 7),
+    ms('h-nic-30', 'Thirty days nicotine-free', 'In a row', 1500, g => g.Hs.nicBest >= 30),
   ],
 
   xpRows: () => kv('Log a meal', `+${H_XP.food}`) + kv('Glass of water', `+${H_XP.water}`, `up to ${WATER_GOAL} a day`)
-    + kv('Gym session', `+${H_XP.gym}`, `+${SHIFT_GYM_BONUS} more on a shift day`) + kv('Weigh in', `+${H_XP.weights}`, 'once a day'),
+    + kv('Gym session', `+${H_XP.gym}`, `+${SHIFT_GYM_BONUS} more on a shift day`) + kv('Weigh in', `+${H_XP.weights}`, 'once a day')
+    + kv('Alcohol-free or nicotine-free day', `+${SUB_XP} each`, 'ticked on the day'),
 
   forms: healthForms,
   actions: {
     meal: (el, d) => { const m = H().meals.find(x => x.id === d.id); if (m) { closeSheet(); logMeal(m); } },
     'meal-sheet': () => mealSheet(),
+    'sub-sheet': () => { hSubDay = null; subSheet(); },
+    'sub-day': (el, d) => {
+      const n = addDays(hSubDay || todayISO(), Number(d.d));
+      if (n > todayISO() || n < addDays(todayISO(), -FOOD_BACK_DAYS)) return;
+      hSubDay = n === todayISO() ? null : n; subSheet();
+    },
+    'sub-clean': (el, d) => {
+      const day = hSubDay || todayISO(), on = subClean(d.kind, day), K = SUB_KINDS[d.kind];
+      if (on) { H().subs.log = H().subs.log.filter(x => x !== on); save(); render(); subSheet(); return; }
+      // XP only when ticked on the day itself, like supplements
+      const g0 = globalStats(), { xp, mult } = day === todayISO() ? award(SUB_XP) : { xp: 0, mult: 1 };
+      const e = { id: uid(), kind: d.kind, date: day, clean: true, ts: Date.now(), xp, mult };
+      H().subs.log.push(e);
+      save(); render(); subSheet();
+      const n = subStreak(d.kind);
+      finishAction(g0, `${K.name}: clean day${day === todayISO() && n > 1 ? ` · <b>${n} days ${K.free}</b>` : ''}${xp ? ` · <b>${xpLabel(e)}</b>` : ''}`);
+    },
+    'sub-add': (el, d) => {
+      const it = SUB_KINDS[d.kind]?.items.find(x => x.id === d.id);
+      if (!it) return;
+      addSub({ kind: d.kind, date: hSubDay || todayISO(), name: it.name, item: it.id, n: 1, ...(it.units ? { units: it.units, kcal: it.kcal } : {}) });
+    },
+    'sub-del': (el, d) => { H().subs.log = H().subs.log.filter(x => x.id !== d.id); save(); render(); subSheet(); },
     'supp-sheet': () => suppSheet(),
     'meal-other': () => foodSheet(),
     'meal-remove': (el, d) => {

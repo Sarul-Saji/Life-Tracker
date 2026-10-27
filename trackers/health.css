@@ -155,6 +155,36 @@
 .dw-col.now span { color: var(--ink); }
 .dw .gw-target { bottom: calc(36px + var(--bh) * var(--t)); }
 .k-bar.good { background: var(--good); }
+.k-bar.none { background: var(--line); }
+/* Alcohol and nicotine */
+.subs { display: grid; gap: 18px; }
+.sub-row { display: grid; gap: 6px; }
+.sub-row + .sub-row { padding-top: 16px; border-top: 1px solid var(--line); }
+.sub-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 14px; }
+.sub-top b { font-weight: 600; }
+.sub-top .good, .sub-line b.good { color: var(--good); }
+.sub-top .warn { color: var(--warn); }
+.sub-top .muted { font-size: 12.5px; }
+.sub-big { font: 400 32px/1 var(--serif); }
+.sub-big small { font: 400 13px var(--sans); color: var(--muted); margin-left: 4px; }
+.sub-units { margin: 2px 0; }
+.sub-line { font-size: 12.5px; color: var(--ink2); }
+.sub-line b { color: var(--ink); font-weight: 600; }
+.sub-strip { display: grid; grid-template-columns: repeat(30, 1fr); gap: 2px; margin: 4px 0 2px; }
+.sub-strip i { height: 16px; border-radius: 3px; background: var(--line); }
+.sub-strip i.clean { background: var(--good); }
+.sub-strip i.used { background: var(--warn); }
+.sub-strip i.today { box-shadow: 0 0 0 1.5px var(--ink); }
+.sub-btn { margin-top: 2px; }
+.sub-block { display: grid; gap: 10px; margin-bottom: 22px; }
+.sub-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+.sub-item { display: grid; gap: 2px; padding: 10px; border: 0; border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); color: var(--ink); text-align: left; cursor: pointer; }
+.sub-item:active { transform: scale(.97); }
+.sub-item b { font-size: 13px; font-weight: 600; }
+.sub-item span { font-size: 11px; color: var(--muted); }
+.sub-custom { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.sub-custom input { min-width: 0; }
+.sheet .day-nav h2 { margin: 0; }
 /* Gym days per week */
 .gw-title { margin-top: 16px; font-size: 12px; color: var(--muted); }
 .gw { --bh: 90px; position: relative; display: flex; gap: 6px; margin-top: 8px; }
