@@ -8,11 +8,13 @@ let showAllTx = false;
 const TX_XP = { expense: 10, income: 20, transfer: 30, nospend: 20 };
 
 const cat = (id, name, ic) => ({ id, name, icon: ic });
+// Money's own icon (the shared set in core/helpers.js has no scissors)
+ICONS.scissors ||= '<circle cx="6.5" cy="7" r="2.5"/><circle cx="6.5" cy="17" r="2.5"/><path d="M8.6 8.4 19 17M8.6 15.6 19 7"/>';
 const EXPENSE_CATS = [
   cat('rent', 'Rent', 'home'), cat('bills', 'Bills', 'bolt'), cat('groceries', 'Groceries', 'basket'), cat('household', 'Household', 'bottle'),
   cat('takeaway', 'Takeaways', 'bag'), cat('eatingout', 'Eating out', 'fork'), cat('transport', 'Transport', 'train'), cat('subscriptions', 'Subscriptions', 'repeat'),
   cat('alcohol', 'Alcohol', 'glass'), cat('snus', 'Snus', 'tin'), cat('vape', 'Vape', 'vape'), cat('shopping', 'Shopping', 'tag'),
-  cat('leisure', 'Leisure', 'ticket'), cat('health', 'Health', 'heart'), cat('travel', 'Travel', 'plane'), cat('cima', 'CIMA', 'cap'),
+  cat('leisure', 'Leisure', 'ticket'), cat('health', 'Health', 'heart'), cat('haircut', 'Haircut', 'scissors'), cat('travel', 'Travel', 'plane'), cat('cima', 'CIMA', 'cap'),
   cat('visa', 'Visa fee', 'passport'), cat('gifts', 'Gifts', 'gift'), cat('other', 'Other', 'dots'),
 ];
 // Habit spending gets its own card: what it costs over a year, and what it would do for the loan
@@ -232,7 +234,7 @@ const GROUPS = [
   { id: 'home', name: 'Home', cats: ['rent', 'bills', 'household'] },
   { id: 'food', name: 'Food', cats: ['groceries', 'takeaway', 'eatingout'] },
   { id: 'move', name: 'Getting around', cats: ['transport', 'travel'] },
-  { id: 'life', name: 'Lifestyle', cats: ['subscriptions', 'shopping', 'leisure', 'health', 'gifts', 'other'] },
+  { id: 'life', name: 'Lifestyle', cats: ['subscriptions', 'shopping', 'leisure', 'health', 'haircut', 'gifts', 'other'] },
   { id: 'habits', name: 'Habits', cats: ['alcohol', 'snus', 'vape'] },
   { id: 'career', name: 'Career and visa', cats: ['cima', 'visa'] },
 ];
