@@ -10,12 +10,12 @@ const SOON = [['flow', 'timer', 'Flow'], ['todo', 'check', 'To-do']];
 function homeView() {
   const g = globalStats(), lv = levelFrom(g.xp), name = state.profile.name;
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
-  const notices = TRACKERS.flatMap(t => t.notices?.() || []);
+  const notices = shownTrackers().flatMap(t => t.notices?.() || []);
   if (g.act.size > 2 && daysSince(state.lastBackup) > 14)
     notices.push(notice('backup', `Back up your data · last backup ${state.lastBackup ? fmtDay(state.lastBackup) : 'never'}`, 'var(--muted)'));
   const soon = SOON.filter(([id]) => !tracker(id))
     .map(([, ic, label]) => `<button class="soon" data-soon="${label}">${icon(ic)}<div class="name">${label}</div><div class="tag">Coming soon</div></button>`).join('');
-  const cards = [...TRACKERS].sort((a, b) => (a.cardOrder ?? a.order ?? 50) - (b.cardOrder ?? b.order ?? 50)).map(t => t.card?.() || '').join('');
+  const cards = shownTrackers().sort((a, b) => (a.cardOrder ?? a.order ?? 50) - (b.cardOrder ?? b.order ?? 50)).map(t => t.card?.() || '').join('');
   return `<div>
     <header class="home-head">
       <div><div class="date">${today}</div><h1 class="greet">${greeting()},<br>${esc(name)}</h1></div>

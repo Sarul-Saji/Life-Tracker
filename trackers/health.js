@@ -159,22 +159,22 @@ function weightRate(series) {
 
 // Plain-English read of the trend against the goal; the nudges are ±200 kcal so changes stay small
 function weightVerdict(rate, goal, kg) {
-  if (rate == null) return 'Weigh in 3 or 4 times a week, first thing in the morning. After about two weeks this tells you whether your calorie target is right.';
+  if (rate == null) return 'Weigh in 3 or 4 times a week, first thing in the morning. After about two weeks it shows your real trend.';
   const r = `${kgFmt(Math.abs(rate))} kg a week`;
   if (goal === 'lose' || goal === 'recomp') {
     if (rate <= -0.01 * kg) return `Losing about <b>${r}</b>. That's fast: fine for a few weeks, but eat a little more if training feels flat, or you'll lose muscle too.`;
     if (rate <= -0.2) return `Losing about <b>${r}</b>. Right on track.`;
-    if (rate < -0.05) return `Losing slowly, about <b>${r}</b>. Still progress. Eat about 200 kcal a day less if you want it faster.`;
-    return `<b>Not losing yet.</b> Your real burn is probably lower than the estimate. Lower the shift-day calories in Your details by 200, or eat about 200 less a day.`;
+    if (rate < -0.05) return `Losing slowly, about <b>${r}</b>. Still progress. Eat a little less if you want it faster.`;
+    return `<b>Not losing yet.</b> Try eating a little less each day.`;
   }
   if (goal === 'build') {
-    if (rate >= 0.45) return `Gaining about <b>${r}</b>. Faster than muscle can grow, so some of it is fat. Try about 200 kcal a day less.`;
+    if (rate >= 0.45) return `Gaining about <b>${r}</b>. Faster than muscle can grow, so some of it is fat. Try eating a little less.`;
     if (rate >= 0.1) return `Gaining about <b>${r}</b>. A good pace for building muscle.`;
-    return `<b>Not gaining yet.</b> To build muscle you need a small surplus. Try about 200 kcal a day more.`;
+    return `<b>Not gaining yet.</b> To build muscle you need a small surplus. Try eating a little more.`;
   }
-  if (Math.abs(rate) <= 0.2) return `<b>Holding steady</b> (within ${r}). Your target fits.`;
-  return rate > 0 ? `Creeping up about <b>${r}</b>. Your target may be a bit high. Try about 200 kcal a day less.`
-    : `Drifting down about <b>${r}</b>. Your target may be a bit low. Try about 200 kcal a day more.`;
+  if (Math.abs(rate) <= 0.2) return `<b>Holding steady</b> (within ${r}). You're eating about right.`;
+  return rate > 0 ? `Creeping up about <b>${r}</b>. Try eating a little less.`
+    : `Drifting down about <b>${r}</b>. Try eating a little more.`;
 }
 
 // The latest reading becomes the weight your calorie and protein targets use
@@ -188,22 +188,22 @@ function healthCard() {
   if (!state.health) return `<button class="tracker" data-go="health-setup">
       <div class="tr-top">${icon('heart')}<span class="grow">Health</span>${icon('plus')}</div>
       <div class="tr-amount setup">Set up</div>
-      <div class="tr-sub">Food, gym and your shift rota in one place, with a calorie target that knows when you're on shift.</div>
+      <div class="tr-sub">Gym, weight, alcohol and nicotine in one place, with your shift rota.</div>
     </button>`;
-  const today = todayISO(), f = fuelDay(today), hs = healthStats(), type = dayType(today);
+  // Calorie counting was removed at the owner's request: the card shows the gym week instead
+  const today = todayISO(), hs = healthStats(), type = dayType(today), target = H().settings.gymTarget;
   return `<button class="tracker" data-go="health">
       <div class="tr-top">${icon('heart')}<span class="grow">Health</span>
         ${!type ? '<span class="due"><span class="dot"></span>Set today</span>' : ''}${icon('chevR')}</div>
-      <div class="tr-amount">${f.kcal.toLocaleString('en-GB')} <small class="of">/ ${f.t.total.toLocaleString('en-GB')} kcal</small></div>
-      <div class="tr-sub">eaten today · ${type === 'shift' ? 'shift day' : type === 'off' ? 'day off' : 'rota not set'}</div>
-      <div class="bar"><i style="width:${Math.min(100, (f.kcal / f.t.total) * 100)}%"></i></div>
-      <div class="tr-foot"><span>Gym ${hs.thisWeek} of ${H().settings.gymTarget} this week</span><span>Fuel ${f.grade || '—'}</span></div>
+      <div class="tr-amount">${hs.thisWeek} <small class="of">of ${target} gym sessions</small></div>
+      <div class="tr-sub">this week · ${type === 'shift' ? 'shift day' : type === 'off' ? 'day off' : 'rota not set'}</div>
+      <div class="bar"><i style="width:${Math.min(100, (hs.thisWeek / target) * 100)}%"></i></div>
     </button>`;
 }
 
 function healthView() {
-  const h = H(), today = todayISO(), fd = foodDay(), f = fuelDay(fd), hs = healthStats(), t = f.t, target = h.settings.gymTarget;
-  const wk = weekStart(today), days = [...Array(7)].map((_, i) => addDays(wk, i)), pt = proteinTarget(), left = t.total - f.kcal;
+  const h = H(), today = todayISO(), hs = healthStats(), target = h.settings.gymTarget;
+  const wk = weekStart(today), days = [...Array(7)].map((_, i) => addDays(wk, i));
   const narrow = dt => parseISO(dt).toLocaleDateString('en-GB', { weekday: 'narrow' });
   const rota = days.map(dt => {
     const v = dayType(dt);
@@ -218,8 +218,6 @@ function healthView() {
     next = free.length ? `Next good gym day: <b>${free[0] === today ? 'today' : parseISO(free[0]).toLocaleDateString('en-GB', { weekday: 'long' })}</b> (day off).`
       : `${target - hs.thisWeek} more to go this week.`;
   }
-  const todayFood = h.food.filter(x => x.date === fd).sort((a, b) => b.ts - a.ts);
-  const dayLabel = fd === today ? 'today' : fd === addDays(today, -1) ? 'yesterday' : fmtDayShort(fd);
   const sessions = [...h.gym].sort((a, b) => b.date.localeCompare(a.date) || b.ts - a.ts).slice(0, 5);
   return `<div>
     ${topNav('Health')}
@@ -229,37 +227,9 @@ function healthView() {
     <div class="section-title"><span>This week's rota</span><span>Tap a day to change</span></div>
     <div class="rota">${rota}</div>
 
-    <section class="hero">
-      <div class="day-nav">
-        <button class="icon-btn" data-act="food-day" data-d="-1" ${fd <= addDays(today, -FOOD_BACK_DAYS) ? 'disabled' : ''} aria-label="Previous day">${icon('chevL')}</button>
-        <div class="eyebrow">Eaten ${dayLabel}</div>
-        <button class="icon-btn" data-act="food-day" data-d="1" ${fd >= today ? 'disabled' : ''} aria-label="Next day">${icon('chevR')}</button>
-      </div>
-      <div class="hero-amount">${f.kcal.toLocaleString('en-GB')} <small class="of">/ ${t.total.toLocaleString('en-GB')} kcal</small></div>
-      <div class="bar ${f.kcal > t.total * 1.1 ? 'over' : ''}"><i style="width:${Math.min(100, (f.kcal / t.total) * 100)}%"></i></div>
-      <div class="hero-meta"><span>${isDeficitGoal() ? (left >= 0 ? `${left.toLocaleString('en-GB')} kcal under your burn` : `${(-left).toLocaleString('en-GB')} kcal over your burn`)
-        : left >= 0 ? `${left.toLocaleString('en-GB')} kcal left` : `${(-left).toLocaleString('en-GB')} kcal over`}</span>
-        <button class="link" data-act="h-why">How is this worked out?</button></div>
-      ${isDeficitGoal() ? deficitNote(f, fd) : ''}
-    </section>
-
-    <div class="tiles one">
-      <div class="tile"><div class="k">Protein</div><div class="v">${f.protein}<small> / ${pt}g</small></div><div class="bar"><i style="width:${Math.min(100, (f.protein / pt) * 100)}%"></i></div></div>
-    </div>
-
-    <div class="h-open-row">
-      <button class="h-open" data-act="meal-sheet">${icon('bowl')}<span><b>Log a meal</b><small>${fd === today ? `${todayFood.length ? `${todayFood.length} logged today` : 'Nothing logged yet today'}` : `Adding to ${dayLabel}`}</small></span>${icon('chevR')}</button>
-      ${suppButton()}
-    </div>
-    ${todayFood.length ? `<section class="panel tx-box" style="margin-top:12px">${todayFood.map(foodItem).join('')}</section>` : ''}
-
-    ${isDeficitGoal() ? deficitSection() : ''}
+    <div class="h-open-row" style="margin-top:18px">${suppButton()}</div>
 
     ${subSection()}
-
-    ${calSection()}
-
-    ${questStrip('health')}
 
     <div class="section-title"><span>Gym</span><span>${hs.gymCur ? `${hs.gymCur}-week streak` : `Target: ${target} a week`}</span></div>
     <section class="panel pad gym">
@@ -325,7 +295,7 @@ function gymWeeksChart() {
 function gymItem(s) {
   return `<div class="hist gymrow">
     <div class="mark">${icon('dumbbell')}</div>
-    <div class="main"><div class="t">${fmtDayShort(s.date)}</div><div class="s">${s.mins} min · ~${s.kcal} kcal</div></div>
+    <div class="main"><div class="t">${fmtDayShort(s.date)}</div><div class="s">${s.mins} min</div></div>
     <div class="amt">${s.xp ? `<small>+${s.xp} XP</small>` : ''}</div>
     <button class="del" data-act="h-del" data-kind="gym" data-id="${s.id}" aria-label="Remove">${icon('x')}</button>
   </div>`;
@@ -561,17 +531,17 @@ function healthFields(p, s) {
   return `
     <div class="field-label">Goal</div>${chips('goal', Object.entries(GOALS).map(([k, g]) => [k, g.name]), p.goal)}
     <div class="grid2">
-      <label class="field"><span>Height (cm)</span><input name="height" ${moneyAttrs('int', p.heightCm)}><small>6 ft = 183 cm</small></label>
+      <label class="field" hidden><span>Height (cm)</span><input name="height" ${moneyAttrs('int', p.heightCm)}><small>6 ft = 183 cm</small></label>
       <label class="field"><span>Weight (kg)</span><input name="weight" ${moneyAttrs('kg', p.weightKg)}></label>
     </div>
-    <div class="grid2">
+    <div class="grid2" hidden>
       <label class="field"><span>Age</span><input name="age" ${moneyAttrs('int', p.age)}></label>
       <div><div class="field-label">Body</div>${chips('sex', [['m', 'Male'], ['f', 'Female']], p.sex)}</div>
     </div>
     <div class="field-label">Gym sessions a week</div>${chips('gym', [[2, '2'], [3, '3'], [4, '4'], [5, '5'], [6, '6']], s.gymTarget)}
-    <label class="field"><span>Calories you burn on a normal day</span><input name="maint" ${moneyAttrs('int', s.maintKcal || '')} placeholder="${Math.round(bmr(p) * 1.2)}">
+    <label class="field" hidden><span>Calories you burn on a normal day</span><input name="maint" ${moneyAttrs('int', s.maintKcal || '')} placeholder="${Math.round(bmr(p) * 1.2)}">
       <small>Before any shift or gym. Leave empty to use the estimate from your height, weight and age.</small></label>
-    <label class="field"><span>Extra calories burned on a shift day</span><input name="shift" ${moneyAttrs('int', s.shiftBurn)}>
+    <label class="field" hidden><span>Extra calories burned on a shift day</span><input name="shift" ${moneyAttrs('int', s.shiftBurn)}>
       <small>Long hospitality shifts on your feet often burn 600–1,000 extra. 700 is a sensible start.</small></label>`;
 }
 
@@ -579,7 +549,7 @@ function healthSetupView() {
   return `<div>
     ${topNav('New tracker')}
     <h1 class="page-title">Health</h1>
-    <p class="page-lead">Food, gym and your shift rota in one place. These details set your daily calorie target, and they stay on this device.</p>
+    <p class="page-lead">Gym, weight, alcohol and nicotine in one place. Your details stay on this device.</p>
     <form id="f-hsetup">
       ${healthFields({ heightCm: 183, weightKg: 85, age: 27, sex: 'm', goal: 'maintain' }, { gymTarget: 3, shiftBurn: 700 })}
       <div id="h-err" class="err"></div>
@@ -634,8 +604,8 @@ function updateGymPreview() {
   const f = $('#f-gym');
   if (!f) return;
   const k = gymKcal(Number(f.elements.mins.value)), onShift = dayType(f.elements.date.value) === 'shift';
-  $('#g-preview').innerHTML = kv('Estimated burn', `~${k} kcal`, "added to that day's calorie target")
-    + kv('Reward', `+${award(H_XP.gym + (onShift ? SHIFT_GYM_BONUS : 0)).xp} XP`, onShift ? `includes +${SHIFT_GYM_BONUS} shift-day bonus` : '');
+  $('#g-preview').innerHTML = ''
+    + (onShift ? kv('Shift day', 'Double win') : '');
 }
 
 // Each supplement: today's tick, this week's taken/skipped days (tap a past day to fix it), and the last 7 days
@@ -805,14 +775,14 @@ function subSheet() {
   const block = k => {
     const K = SUB_KINDS[k], uses = subUses(k, d), clean = subClean(k, d);
     const r = subRange(k, d, d);
-    const head = uses.length ? (k === 'alc' ? `${unitsFmt(r.units)} units · ~${alcKcal(d)} kcal added to ${label}'s calories` : `${r.count} used ${label}`)
+    const head = uses.length ? (k === 'alc' ? `${unitsFmt(r.units)} units ${label}` : `${r.count} used ${label}`)
       : clean ? `Marked ${K.free}` : 'Not checked in yet';
     return `<div class="sub-block">
       <div class="sub-top"><b>${K.name}</b><span class="muted small">${head}</span></div>
       ${uses.length ? '' : `<button class="btn ${clean ? 'btn-ghost' : 'btn-primary'} btn-block" data-act="sub-clean" data-kind="${k}">${clean ? 'Undo' : K.none}</button>`}
       <div class="sub-items">${K.items.map(it => `<button class="sub-item" data-act="sub-add" data-kind="${k}" data-id="${it.id}"><b>${it.name}</b><span>${[it.sub, it.units ? `${it.units} u` : ''].filter(Boolean).join(' · ') || '+1'}</span></button>`).join('')}</div>
-      ${k === 'alc' ? `<form id="f-alc" class="sub-custom"><input name="units" ${moneyAttrs('kg')} placeholder="Units" aria-label="Units"><input name="kcal" ${moneyAttrs('int')} placeholder="kcal" aria-label="Calories"><button class="btn btn-ghost btn-sm">Add other</button></form>` : ''}
-      ${uses.length ? `<div class="panel sub-list">${uses.map(x => `<div class="kv"><span class="k">${esc(x.name)}${x.units ? `<br><small>${unitsFmt(x.units)} units${x.kcal ? ` · ${x.kcal} kcal` : ''}</small>` : ''}</span>
+      ${k === 'alc' ? `<form id="f-alc" class="sub-custom"><input name="units" ${moneyAttrs('kg')} placeholder="Units" aria-label="Units"><input name="kcal" hidden ${moneyAttrs('int')} placeholder="kcal" aria-label="Calories"><button class="btn btn-ghost btn-sm">Add other</button></form>` : ''}
+      ${uses.length ? `<div class="panel sub-list">${uses.map(x => `<div class="kv"><span class="k">${esc(x.name)}${x.units ? `<br><small>${unitsFmt(x.units)} units</small>` : ''}</span>
         <button type="button" class="del" data-act="sub-del" data-id="${x.id}" aria-label="Remove ${esc(x.name)}">${icon('x')}</button></div>`).join('')}</div>` : ''}
     </div>`;
   };
@@ -856,12 +826,13 @@ function healthSettingsSheet() {
   const h = H();
   openSheet(`
     <h2>Your details</h2>
-    <p class="lead">These set your daily calorie and protein targets.</p>
+    <p class="lead">Your goal, weight and weekly gym target.</p>
     <form id="f-hsettings">
       ${healthFields(h.profile, h.settings)}
-      <div class="field-label">Saved meals</div>
+      <div hidden>
       <div class="panel" style="margin-bottom:18px">${h.meals.map(m => `<div class="kv"><span class="k">${esc(m.name)}<br><small>${m.kcal.toLocaleString('en-GB')} kcal · ${m.protein} g</small></span>
         <button type="button" class="del" data-act="meal-remove" data-id="${m.id}" aria-label="Remove ${esc(m.name)}">${icon('x')}</button></div>`).join('') || '<p class="empty">No saved meals.</p>'}</div>
+      </div>
       <div id="h-err" class="err"></div>
       ${sheetButtons('Save')}
     </form>`);
@@ -898,7 +869,7 @@ function rotaAskSheet() {
   const today = todayISO();
   openSheet(`
     <h2>Working today?</h2>
-    <p class="lead">Shift days add extra calories to your target and count towards fry-free shifts.</p>
+    <p class="lead">Your rota helps pick good gym days.</p>
     <div class="sheet-actions">
       <button class="btn btn-ghost" data-act="rota-set" data-day="${today}" data-v="off">Day off</button>
       <button class="btn btn-primary" data-act="rota-set" data-day="${today}" data-v="shift">Working a shift</button>
@@ -1007,7 +978,7 @@ const healthForms = {
     const onShift = dayType(date) === 'shift';
     addHealth('gym', { mins, date, kcal: gymKcal(mins), ...(onShift ? { bonus: SHIFT_GYM_BONUS } : {}) }, e => {
       const n = healthStats().thisWeek, target = H().settings.gymTarget;
-      return `${onShift ? '<b>Shift and gym, double win.</b> ' : ''}Gym · ${mins} min · ~${e.kcal} kcal · <b>${n} of ${target}</b> this week${n === target ? ' · <b>target hit</b>' : ''} · <b>${xpLabel(e)}</b>`;
+      return `${onShift ? '<b>Shift and gym, double win.</b> ' : ''}Gym · ${mins} min · <b>${n} of ${target}</b> this week${n === target ? ' · <b>target hit</b>' : ''} · <b>${xpLabel(e)}</b>`;
     }, true);
   },
 };
@@ -1187,7 +1158,7 @@ registerTracker({
     'rota-set': (el, d) => {
       H().rota[d.day] = d.v;
       save(); closeSheet(); render();
-      toast(d.v === 'shift' ? `Shift day: +${H().settings.shiftBurn} kcal on today's target.` : 'Day off. A good day for the gym.');
+      toast(d.v === 'shift' ? 'Shift day.' : 'Day off. A good day for the gym.');
     },
     'rota-cycle': (el, d) => {
       const order = ['', 'shift', 'off'], cur = dayType(d.day), next = order[(order.indexOf(cur) + 1) % 3];

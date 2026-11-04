@@ -37,9 +37,11 @@ core/                 the shared engine — owned by the "Compound: main build" 
   main.js             event wiring + start-up (loads last)
   base.css            shared design tokens and components (affects every screen)
 trackers/             one self-contained tracker per file pair
-  money.js / .css     Money (£): income, spending, budgets, India transfers, month close, treat fund
+  money.js / .css     Money (£): HIDDEN by owner request (HIDDEN_TRACKERS in core/game.js); data kept
+                      income, spending, budgets, India transfers, month close, treat fund
   loan.js  / .css     Student loan (₹): EMIs (auto-logged), extra payments, payoff plan
-  health.js / .css    Health: food, water, gym, shift rota, fuel score
+  health.js / .css    Health: gym, weight, alcohol + nicotine, supplements, shift rota (calorie/food UI removed
+                      by owner request; food data and functions kept but not shown)
 sw.js                 offline support (network-first)
 ```
 Each tracker calls `registerTracker({...})` once (see the comment at the top of `core/game.js` for every hook:

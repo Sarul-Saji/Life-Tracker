@@ -11,6 +11,7 @@ function render() {
     TRACKERS.forEach(t => Object.assign(screens, t.views));
     const owner = TRACKERS.find(t => t.needsData?.[view]);
     if (owner && !owner.needsData[view]()) view = 'home';
+    if (TRACKERS.some(t => HIDDEN_TRACKERS.has(t.id) && t.views?.[view])) view = 'home';
     app.innerHTML = (screens[view] || homeView)();
   }
   const anim = animateNext;

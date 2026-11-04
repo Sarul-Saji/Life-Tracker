@@ -387,3 +387,4 @@ button.link { font-size: 13px; color: var(--muted); text-decoration: underline; 
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 .avatar.plain .ini { width: 100%; height: 100%; }
+[hidden] { display: none !important; }

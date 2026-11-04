@@ -32,7 +32,7 @@ function registerTracker(t) {
   TRACKERS.push(t);
   TRACKERS.sort((a, b) => (a.order ?? 50) - (b.order ?? 50));
   Object.entries(t.quests || {}).forEach(([id, q]) => { QUESTS[id] = { ...q, tracker: t.id }; });
-  MILESTONES.push(...(t.milestones || []));
+  MILESTONES.push(...(t.milestones || []).map(m => ({ ...m, tracker: t.id })));
 }
 const tracker = id => TRACKERS.find(t => t.id === id);
 
@@ -169,8 +169,12 @@ function globalStats() {
 }
 
 // Quest milestones are hidden now that quests are (their ids stay so saved data is untouched)
-const HIDDEN_MS = new Set(['quest-1', 'chest-1']);
-const shownMilestones = () => MILESTONES.filter(m => !HIDDEN_MS.has(m.id));
+// Health food/calorie milestones are hidden too, since calorie counting was removed
+const HIDDEN_MS = new Set(['quest-1', 'chest-1', 'h-meal-1', 'h-water-1', 'h-fry-1', 'h-fry-10', 'h-fry-50', 'h-fuel-a', 'h-fuel-a7', 'h-def-1', 'h-def-7', 'h-def-30']);
+// Trackers the owner switched off: their card, notices, screens and milestones are hidden; saved data stays
+const HIDDEN_TRACKERS = new Set(['money']);
+const shownTrackers = () => TRACKERS.filter(t => !HIDDEN_TRACKERS.has(t.id));
+const shownMilestones = () => MILESTONES.filter(m => !HIDDEN_MS.has(m.id) && !HIDDEN_TRACKERS.has(m.tracker));
 
 // Everything worth celebrating that changed between two snapshots
 function rewardsBetween(g0, g1) {
